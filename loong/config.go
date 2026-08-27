@@ -26,7 +26,9 @@ var envRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 
 // LoadTree reads and parses a loong.yaml config tree. ${ENV} placeholders
 // in the file are replaced with the corresponding environment variables
-// (empty string when unset).
+// (empty string when unset). Expansion is text-level and happens before
+// YAML parsing, so values containing YAML-significant characters
+// (:, #, quotes, ...) must be quoted in the config file.
 func LoadTree(path string) (*Node, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

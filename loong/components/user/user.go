@@ -20,6 +20,9 @@ type Config struct {
 	DBPath string `yaml:"db_path"`
 }
 
+// ErrUsernameTaken is returned when registering an existing username.
+var ErrUsernameTaken = errors.New("user: username already taken")
+
 // User is the core user record. OpenID is reserved for wechat channels
 // (miniprogram / official account); unionid bridging is a future
 // extension component.
@@ -41,8 +44,31 @@ type Service struct {
 // Close releases the underlying database.
 func (s *Service) Close() error { return s.db.Close() }
 
+// OpenService opens (and initializes) a user store at the given
+// database path. ":memory:" is supported for tests.
+func OpenService(dbPath string) (*Service, error) {
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT UNIQUE,
+		password_hash TEXT,
+		nickname TEXT,
+		openid TEXT,
+		created_at TEXT)`); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("user: init schema: %w", err)
+	}
+	return &Service{db: db}, nil
+}
+
 // Register creates an account with a username and password.
 func (s *Service) Register(username, password, nickname string) (*User, error) {
+	if _, err := s.FindByUsername(username); err == nil {
+		return nil, ErrUsernameTaken
+	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {
 		return nil, err
@@ -53,7 +79,10 @@ func (s *Service) Register(username, password, nickname string) (*User, error) {
 	if err != nil {
 		return nil, err
 	}
-	id, _ := res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("user: last insert id: %w", err)
+	}
 	return s.FindByID(id)
 }
 
@@ -89,18 +118,23 @@ func (s *Service) FindByOpenID(openid string) (*User, error) {
 
 // CreateWithOpenID creates (or returns) the user bound to a wechat
 // openid — the entry point for miniprogram / official account login.
+// INSERT OR IGNORE makes concurrent logins with the same openid safe.
 func (s *Service) CreateWithOpenID(openid, nickname string) (*User, error) {
-	if u, err := s.FindByOpenID(openid); err == nil {
-		return u, nil
-	}
 	res, err := s.db.Exec(
-		`INSERT INTO users (username, password_hash, nickname, openid, created_at) VALUES (?, '', ?, ?, ?)`,
+		`INSERT OR IGNORE INTO users (username, password_hash, nickname, openid, created_at) VALUES (?, '', ?, ?, ?)`,
 		"wx_"+openid, nickname, openid, time.Now().UTC().Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}
-	id, _ := res.LastInsertId()
-	return s.FindByID(id)
+	if n, err := res.RowsAffected(); err == nil && n > 0 {
+		id, err := res.LastInsertId()
+		if err != nil {
+			return nil, fmt.Errorf("user: last insert id: %w", err)
+		}
+		return s.FindByID(id)
+	}
+	// Rows affected 0: the record was created concurrently; return it.
+	return s.FindByOpenID(openid)
 }
 
 func (s *Service) scanRow(row *sql.Row) (*User, error) {
@@ -116,7 +150,11 @@ func (s *Service) scanRow(row *sql.Row) (*User, error) {
 	}
 	u.Password = pass
 	u.OpenID = oid.String
-	u.CreatedAt, _ = time.Parse(time.RFC3339, created)
+	createdAt, err := time.Parse(time.RFC3339, created)
+	if err != nil {
+		return nil, fmt.Errorf("user: parse created_at %q: %w", created, err)
+	}
+	u.CreatedAt = createdAt
 	return &u, nil
 }
 
@@ -134,20 +172,11 @@ func (c *Component) Build(ctx *loong.Scope) error {
 	if cfg.DBPath == "" {
 		cfg.DBPath = "loong.db"
 	}
-	db, err := sql.Open("sqlite", cfg.DBPath)
+	svc, err := OpenService(cfg.DBPath)
 	if err != nil {
 		return err
 	}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS users (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		username TEXT UNIQUE,
-		password_hash TEXT,
-		nickname TEXT,
-		openid TEXT,
-		created_at TEXT)`); err != nil {
-		return fmt.Errorf("user: init schema: %w", err)
-	}
-	c.Service = &Service{db: db}
+	c.Service = svc
 	ctx.Kernel.Provide(c.Service)
 	return nil
 }

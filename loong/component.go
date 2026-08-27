@@ -1,6 +1,10 @@
 package loong
 
-import "gopkg.in/yaml.v3"
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
 
 // Component is the four-phase lifecycle interface every loong
 // component implements: Register (declare event subscriptions),
@@ -28,6 +32,24 @@ func (r *Registry) On(name string, h Handler) {
 		r.node.handlers = make(map[string]Handler)
 	}
 	r.node.handlers[name] = h
+}
+
+// OnTyped subscribes to an event and type-asserts its payload into T,
+// giving subscribers a compile-time-typed handler while the kernel
+// keeps Event.Payload opaque. Events are dispatched by string name, so
+// generics cannot reach into the routing table itself (interface
+// methods cannot have type parameters); this wrapper moves the
+// assertion to the subscription side where the type is known.
+// It returns an error from the wrapped handler when the payload type
+// does not match T.
+func OnTyped[T any](reg *Registry, name string, h func(T) error) {
+	reg.On(name, func(e Event) error {
+		p, ok := e.Payload.(T)
+		if !ok {
+			return fmt.Errorf("loong: event %q payload is %T, want %T", e.Name, e.Payload, *new(T))
+		}
+		return h(p)
+	})
 }
 
 // Scope carries the node and its raw config block during Build/Run.

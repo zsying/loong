@@ -1,6 +1,7 @@
 package loong
 
 import (
+	"errors"
 	"reflect"
 	"sync"
 	"testing"
@@ -97,10 +98,106 @@ func TestEventRouting(t *testing.T) {
 	}
 }
 
+// typedLog collects payloads received via OnTyped.
+var typedLog []string
+
+// typedParent subscribes with OnTyped[string] and records the payload.
+type typedParent struct {
+	Base
+}
+
+func (p *typedParent) Register(reg *Registry) error {
+	OnTyped(reg, "x.typed", func(s string) error {
+		typedLog = append(typedLog, s)
+		return nil
+	})
+	return nil
+}
+
+// typedChild emits an arbitrary payload for "x.typed".
+type typedChild struct {
+	Base
+	payload any
+}
+
+func (c *typedChild) Run(ctx *Scope) error {
+	return ctx.Emit("x.typed", c.payload)
+}
+
+func TestOnTyped(t *testing.T) {
+	Register("test.tparent", func() Component { return &typedParent{} })
+	Register("test.tchild", func() Component { return &typedChild{payload: "hi"} })
+
+	// Matching payload type: handler receives the typed value.
+	k := New()
+	root := &Node{
+		Type: "test.tparent", ID: "p",
+		Children: []*Node{{Type: "test.tchild", ID: "c"}},
+	}
+	if err := k.Assemble(root); err != nil {
+		t.Fatalf("assemble: %v", err)
+	}
+	if len(typedLog) != 1 || typedLog[0] != "hi" {
+		t.Errorf("typed payload = %v, want [hi]", typedLog)
+	}
+
+	// Mismatched payload type: the wrapped handler error surfaces
+	// through Emit during Run.
+	Register("test.tbad", func() Component { return &typedChild{payload: 42} })
+	k2 := New()
+	root2 := &Node{
+		Type: "test.tparent", ID: "p2",
+		Children: []*Node{{Type: "test.tbad", ID: "c2"}},
+	}
+	if err := k2.Assemble(root2); err == nil {
+		t.Error("expected error for mismatched typed payload")
+	}
+}
+
 func TestUnknownComponentType(t *testing.T) {
 	k := New()
 	root := &Node{Type: "test.missing", ID: "x"}
 	if err := k.Assemble(root); err == nil {
 		t.Fatal("expected error for unknown component type")
+	}
+}
+
+// buildFail fails during Build.
+type buildFail struct {
+	Base
+}
+
+func (b *buildFail) Build(*Scope) error { return errors.New("boom") }
+
+func TestAssembleFailureCleanup(t *testing.T) {
+	var r recorder
+	Register("test.failcleanup", func() Component { return &spy{r: &r} })
+	Register("test.failboom", func() Component { return &buildFail{} })
+	root := &Node{
+		Type: "test.failcleanup", ID: "p",
+		Children: []*Node{
+			{Type: "test.failcleanup", ID: "c1"},
+			{Type: "test.failboom", ID: "c2"},
+		},
+	}
+	k := New()
+	if err := k.Assemble(root); err == nil {
+		t.Fatal("expected assembly to fail")
+	}
+	// c1 was built before c2 failed; it must be stopped during cleanup.
+	found := false
+	for _, s := range r.order {
+		if s == "stop:c1" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("built components not cleaned up on failure; order = %v", r.order)
+	}
+	// Shutdown after a failed assembly must not panic (root may be nil).
+	k2 := New()
+	if err := k2.Shutdown(); err != nil {
+		t.Fatalf("shutdown before assemble: %v", err)
 	}
 }

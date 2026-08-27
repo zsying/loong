@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -109,7 +110,12 @@ func (w *Web) handleRegister(rw http.ResponseWriter, r *http.Request) {
 	}
 	u, err := w.users.Register(req.Username, req.Password, req.Nickname)
 	if err != nil {
-		http.Error(rw, err.Error(), http.StatusBadRequest)
+		if errors.Is(err, user.ErrUsernameTaken) {
+			http.Error(rw, "username already taken", http.StatusConflict)
+			return
+		}
+		slog.Error("register", "err", err)
+		http.Error(rw, "internal error", http.StatusInternalServerError)
 		return
 	}
 	writeJSON(rw, http.StatusOK, map[string]any{"id": u.ID, "username": u.Username, "nickname": u.Nickname})
@@ -149,9 +155,15 @@ func (w *Web) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		claims := jwt.MapClaims{}
-		if _, err := jwt.ParseWithClaims(tok, claims, func(t *jwt.Token) (any, error) {
+		_, err := jwt.ParseWithClaims(tok, claims, func(t *jwt.Token) (any, error) {
+			// Reject any algorithm other than HMAC to prevent
+			// algorithm-confusion attacks.
+			if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, fmt.Errorf("web: unexpected signing method %v", t.Header["alg"])
+			}
 			return []byte(w.cfg.JWTSecret), nil
-		}); err != nil {
+		})
+		if err != nil {
 			http.Error(rw, "unauthorized", http.StatusUnauthorized)
 			return
 		}
