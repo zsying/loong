@@ -1,0 +1,22 @@
+type: app
+config:
+  name: hello
+children:
+  - type: log
+    id: logger
+    config:
+      level: debug
+  - type: user
+    id: users
+    config:
+      db_path: ./hello.db
+  - type: web
+    id: main
+    config:
+      listen: ":8080"
+      jwt_secret: ${LOONG_JWT_SECRET}
+    children:
+      - type: biz.greet
+        id: greet
+        config:
+          route: /api/greet

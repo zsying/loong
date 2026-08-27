@@ -1,0 +1,9 @@
+# Runtime artifacts
+*.db
+*.db-shm
+*.db-wal
+*.exe
+*.out
+
+# Project-local data (kept out of the repository)
+.workbuddy/
