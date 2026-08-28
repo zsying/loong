@@ -12,8 +12,9 @@ Every new software project starts by re-implementing the same parts: login, conf
 ## Features
 
 - **Component tree architecture** — the whole system is a tree of component instances; the tree expresses composition, config scope and communication paths.
-- **Four-phase lifecycle** — `Register` → `Build` → `Run` → `Stop`, with graceful shutdown in reverse Run order.
+- **Three-phase lifecycle** — `Build` → `Run` → `Stop`, with graceful shutdown in reverse Run order.
 - **Base skeleton component** — embed `loong.Base` and override only the phases you care about; the core interface stays minimal.
+- **One-call bootstrap** — `loong.LoadAndRun(path, loong.WithWait())` loads the config tree, assembles and runs the whole tree, then optionally blocks for a SIGINT/SIGTERM shutdown signal.
 - **Schema-per-component config tree** — the kernel reads only the skeleton (`type` / `id` / `config` / `children`); every component decodes its own opaque `config` block from a YAML file, so config structure grows freely with the components you mount.
 - **Two-way parent-child communication** — config injected downward at build time, events emitted upward at runtime, type-based service lookup as a side channel.
 - **Type-based service lookup** — `ctx.Kernel.Get[T]()`, the Go type itself is the key.
@@ -32,7 +33,7 @@ loong/
 
 ## Requirements
 
-- Go 1.22+ (net/http method+path routing patterns)
+- Go 1.27+ (generic methods; net/http method+path routing patterns)
 
 ## Quick start
 
@@ -91,7 +92,7 @@ func (g *greet) Build(ctx *loong.Scope) error {
 }
 
 func init() {
-    loong.Register("biz.greet", func() loong.Component { return &greet{} })
+    loong.RegisterComponent("biz.greet", func() loong.Component { return &greet{} })
 }
 ```
 

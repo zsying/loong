@@ -32,7 +32,7 @@
 
 - **实现语言：Go**。
 - **独立内核**：loong 自己实现内核，不直接复用 owl 代码。
-- **思想继承 owl**：register / build / run 三阶段生命周期、init() 自注册、type-based 服务 key 等已验证机制沿用，接口可自由调整。
+- **思想继承 owl**：build / run / stop 三阶段生命周期、init() 自注册、type-based 服务 key 等已验证机制沿用，接口可自由调整。
 - **单进程单体**：整棵组件树跑在一个进程内，组件间调用零开销，简单可调试。
 - **配置树格式：YAML**，两段式解析（schema-per-component），详见 4.2。
 - **日志：标准库 log/slog**，JSON 输出、级别可配，零外部依赖。
@@ -47,7 +47,7 @@
 | 项 | 决策 |
 |---|---|
 | 实现语言 | Go |
-| 内核 | 独立实现，思想继承 owl（register/build/run/stop 四阶段、init() 自注册、type-based 服务 key）；提供 Base 骨架组件 |
+| 内核 | 独立实现，思想继承 owl（build/run/stop 三阶段、init() 自注册、type-based 服务 key）；提供 Base 骨架组件 |
 | 部署形态 | 单进程单体 |
 | 配置树 | YAML，两段式解析（schema-per-component），支持 `${ENV}` 展开 |
 | 事件协议 | `{Name, Source, Payload}`，直达直接父节点，`On(name, handler)` 订阅 |
@@ -126,16 +126,16 @@ Application Root
 
 - **配置树**声明结构：谁挂在哪、父给什么配置。
 - **init() 自注册**声明类型：组件类型自己向内核注册。
-- **装配器**流程：读配置树 → 实例化组件 → 注入下行配置 → 接好事件 → 按 register / build / run / stop 四阶段启动；Shutdown 按 Run 的逆序调 Stop。
-- **Base 骨架**：loong 包提供可嵌入的 Base（空默认四方法 + Ctx + Emit / Logger），组件嵌入后只需覆盖关心的阶段——核心接口保持最小，复杂度按需覆盖。
+- **装配器**流程：读配置树 → 实例化组件 → 注入下行配置 → 接好事件 → 按 build / run / stop 三阶段启动；Shutdown 按 Run 的逆序调 Stop。
+- **一键启动**：`loong.LoadAndRun(path, loong.WithWait())` 合并“读配置树 → 实例化 → Build → Run”，`WithWait` 时阻塞到 SIGINT/SIGTERM 再优雅关闭；底层 `LoadTree` / `New` / `Assemble` 仍可直接调用（测试、嵌入式场景）。
+- **Base 骨架**：loong 包提供可嵌入的 Base（空默认三方法 + Scope + Emit / Logger），组件嵌入后只需覆盖关心的阶段——核心接口保持最小，复杂度按需覆盖。
 - 运行期支持动态启用 / 禁用 / 替换实例。
 
 **生命周期阶段**（装配一次、运行长期；对应 React 的 mount / unmount，无 update 循环——配置树装配后不再变化）：
 
 | 阶段 | 时机 | 职责 |
 |---|---|---|
-| Register | 全树实例化后统一调用（先父后子） | 声明：订阅事件 |
-| Build | Register 全树完成后 | 解码 config、Get / Provide 服务、接线 |
+| Build | 全树实例化后统一调用（先父后子） | 解码 config、Get / Provide 服务、订阅子节点事件、接线 |
 | Run | 全树 Build 全部成功后 | 启动服务（先接线后点火） |
 | Stop | Shutdown 时按 Run 逆序（子先父后） | 优雅关闭（关 server / db / flush） |
 
@@ -216,7 +216,7 @@ children:
 - 可变部分走配置 / 接口，不写死全局状态。
 - 上行靠事件，下行靠配置，协作靠服务查找。
 - **优先嵌入 `loong.Base`**，只覆盖关心的生命周期阶段。
-- 遵守 register / build / run / stop 四阶段生命周期；Stop 里释放自己持有的资源（server / db / flush）。
+- 遵守 build / run / stop 三阶段生命周期；Stop 里释放自己持有的资源（server / db / flush）。
 - 不直接持有父节点 / 兄弟节点引用。
 - **业务扩展 = 项目组件**：业务能力的扩展同样以项目组件形式实现（业务项目里定义组件类型 + init() 注册 + 配置树挂载），与平台组件共用同一套机制——平台不预设业务，能力以组件插拔。
 

@@ -1,15 +1,13 @@
 // Command hello is the v0.1 sample project. It demonstrates the loong
 // kernel with log, user and web components, plus a business component
-// mounted under the web channel, and graceful shutdown on SIGINT.
+// mounted under the web channel, started via loong.LoadAndRun and shut
+// down gracefully on SIGINT/SIGTERM.
 package main
 
 import (
 	"log"
-	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 
 	_ "github.com/zsying/loong/components/log"
 	_ "github.com/zsying/loong/components/user"
@@ -61,20 +59,10 @@ func main() {
 	if len(os.Args) < 2 {
 		log.Fatal("usage: hello <config.yaml>")
 	}
-	root, err := loong.LoadTree(os.Args[1])
-	if err != nil {
+	// LoadAndRun loads the config tree, assembles a Kernel, runs the whole
+	// tree, then (WithWait) blocks for SIGINT/SIGTERM and shuts down
+	// gracefully. Without WithWait it returns the running Kernel.
+	if _, err := loong.LoadAndRun(os.Args[1], loong.WithWait()); err != nil {
 		log.Fatal(err)
-	}
-	k := loong.New()
-	if err := k.Assemble(root); err != nil {
-		log.Fatal(err)
-	}
-	slog.Info("hello running, Ctrl+C to stop")
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, os.Interrupt, syscall.SIGTERM)
-	<-ch
-	slog.Info("shutting down")
-	if err := k.Shutdown(); err != nil {
-		slog.Error("shutdown", "err", err)
 	}
 }
