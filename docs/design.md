@@ -35,7 +35,7 @@
 - **思想继承 owl**：build / run / stop 三阶段生命周期、init() 自注册、type-based 服务 key 等已验证机制沿用，接口可自由调整。
 - **单进程单体**：整棵组件树跑在一个进程内，组件间调用零开销，简单可调试。
 - **配置树格式：YAML**，两段式解析（schema-per-component），详见 4.2。
-- **日志：标准库 log/slog**，JSON 输出、级别可配，零外部依赖。
+- **日志：标准库 log/slog**，console（彩色文本，默认）/ json 双格式、级别可配，零外部依赖。
 - **服务查找：泛型 Kernel.Get[T]()**，Go 类型即 key（不用字符串）。
 - **Web 渠道：标准库 net/http（Go 1.22 方法+路径路由）+ golang-jwt**。
 - **用户存储：modernc.org/sqlite（纯 Go，无 cgo）**，内核留存储接口，后续可换后端。
@@ -53,7 +53,7 @@
 | 事件协议 | `{Name, Source, Payload}`，直达直接父节点，`On(name, handler)` 订阅 |
 | 服务查找 | 泛型 `Kernel.Get[T]()`，Go 类型即 key |
 | 组件上下文 | `loong.Scope`（刻意避开标准库 `context.Context` 同名冲突） |
-| 日志 | 标准库 log/slog，JSON 输出、级别可配 |
+| 日志 | 标准库 log/slog，console（彩色）/ json 双格式、级别可配 |
 | 用户存储 | modernc.org/sqlite（纯 Go，无 cgo） |
 | Web 渠道 | 标准库 net/http + golang-jwt |
 | 微信 API | 自写最小 HTTP 封装（不引入 SDK） |

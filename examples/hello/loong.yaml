@@ -6,6 +6,7 @@ children:
     id: logger
     config:
       level: debug
+      format: console
   - type: user
     id: users
     config:
