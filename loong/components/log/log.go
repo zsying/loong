@@ -38,5 +38,5 @@ func (l *Log) Build(ctx *loong.Scope) error {
 }
 
 func init() {
-	loong.Register("log", func() loong.Component { return &Log{} })
+	loong.RegisterComponent("log", func() loong.Component { return &Log{} })
 }

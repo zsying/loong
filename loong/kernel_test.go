@@ -31,7 +31,7 @@ func (s *spy) Stop(ctx *Scope) error  { s.r.record("stop:" + ctx.Node.ID); retur
 
 func TestLifecycleOrder(t *testing.T) {
 	var r recorder
-	Register("test.spy", func() Component { return &spy{r: &r} })
+	RegisterComponent("test.spy", func() Component { return &spy{r: &r} })
 	root := &Node{
 		Type: "test.spy", ID: "root",
 		Children: []*Node{
@@ -64,8 +64,8 @@ type eventParent struct {
 	got *string
 }
 
-func (p *eventParent) Register(reg *Registry) error {
-	reg.On("x.hello", func(e Event) error {
+func (p *eventParent) Build(ctx *Scope) error {
+	ctx.On("x.hello", func(e Event) error {
 		*p.got = e.Source
 		return nil
 	})
@@ -83,8 +83,8 @@ func (c *eventChild) Run(ctx *Scope) error {
 
 func TestEventRouting(t *testing.T) {
 	var got string
-	Register("test.parent", func() Component { return &eventParent{got: &got} })
-	Register("test.child", func() Component { return &eventChild{} })
+	RegisterComponent("test.parent", func() Component { return &eventParent{got: &got} })
+	RegisterComponent("test.child", func() Component { return &eventChild{} })
 	root := &Node{
 		Type: "test.parent", ID: "parent",
 		Children: []*Node{{Type: "test.child", ID: "child"}},
@@ -106,8 +106,8 @@ type typedParent struct {
 	Base
 }
 
-func (p *typedParent) Register(reg *Registry) error {
-	OnTyped(reg, "x.typed", func(s string) error {
+func (p *typedParent) Build(ctx *Scope) error {
+	ctx.OnTyped("x.typed", func(s string) error {
 		typedLog = append(typedLog, s)
 		return nil
 	})
@@ -125,8 +125,8 @@ func (c *typedChild) Run(ctx *Scope) error {
 }
 
 func TestOnTyped(t *testing.T) {
-	Register("test.tparent", func() Component { return &typedParent{} })
-	Register("test.tchild", func() Component { return &typedChild{payload: "hi"} })
+	RegisterComponent("test.tparent", func() Component { return &typedParent{} })
+	RegisterComponent("test.tchild", func() Component { return &typedChild{payload: "hi"} })
 
 	// Matching payload type: handler receives the typed value.
 	k := New()
@@ -143,7 +143,7 @@ func TestOnTyped(t *testing.T) {
 
 	// Mismatched payload type: the wrapped handler error surfaces
 	// through Emit during Run.
-	Register("test.tbad", func() Component { return &typedChild{payload: 42} })
+	RegisterComponent("test.tbad", func() Component { return &typedChild{payload: 42} })
 	k2 := New()
 	root2 := &Node{
 		Type: "test.tparent", ID: "p2",
@@ -171,8 +171,8 @@ func (b *buildFail) Build(*Scope) error { return errors.New("boom") }
 
 func TestAssembleFailureCleanup(t *testing.T) {
 	var r recorder
-	Register("test.failcleanup", func() Component { return &spy{r: &r} })
-	Register("test.failboom", func() Component { return &buildFail{} })
+	RegisterComponent("test.failcleanup", func() Component { return &spy{r: &r} })
+	RegisterComponent("test.failboom", func() Component { return &buildFail{} })
 	root := &Node{
 		Type: "test.failcleanup", ID: "p",
 		Children: []*Node{

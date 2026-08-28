@@ -43,7 +43,7 @@ func (g *greet) Build(ctx *loong.Scope) error {
 	}
 	g.Base.Build(ctx)
 	g.route = cfg.Route
-	if r := loong.Get[*web.Router](ctx.Kernel); r != nil {
+	if r := ctx.Kernel.Get[*web.Router](); r != nil {
 		r.Handle("GET", g.route, func(rw http.ResponseWriter, req *http.Request) {
 			_ = g.Emit("biz.greet.hello", map[string]string{"msg": "greetings from biz"})
 			_, _ = rw.Write([]byte("greetings from biz component\n"))
@@ -53,8 +53,8 @@ func (g *greet) Build(ctx *loong.Scope) error {
 }
 
 func init() {
-	loong.Register("app", func() loong.Component { return &app{} })
-	loong.Register("biz.greet", func() loong.Component { return &greet{} })
+	loong.RegisterComponent("app", func() loong.Component { return &app{} })
+	loong.RegisterComponent("biz.greet", func() loong.Component { return &greet{} })
 }
 
 func main() {

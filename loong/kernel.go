@@ -37,25 +37,18 @@ func (k *Kernel) Provide(service any) *Kernel {
 }
 
 // Assemble instantiates the tree from a loaded config root and runs
-// the four phases over the whole tree in order: Register, Build, Run.
-// Run is intentionally last so every component is fully built before
-// any of them starts serving (wire first, fire later). If Build or Run
-// fails, components already built are stopped in reverse order so
-// acquired resources (db connections, servers) are released.
+// the three phases over the whole tree in order: Build, Run. Build is
+// intentionally first so every component is wired (config decoded,
+// dependencies resolved, event handlers subscribed) before any of them
+// starts serving (wire first, fire later). If Build or Run fails,
+// components already built are stopped in reverse order so acquired
+// resources (db connections, servers) are released.
 func (k *Kernel) Assemble(root *Node) error {
 	k.root = root
 	if err := k.instantiate(root, nil); err != nil {
 		return err
 	}
 	if err := k.checkUniqueIDs(root); err != nil {
-		return err
-	}
-	if err := k.walk(root, func(n *Node) error {
-		if err := n.component.Register(&Registry{kernel: k, node: n}); err != nil {
-			return fmt.Errorf("loong: register %q: %w", n.ID, err)
-		}
-		return nil
-	}); err != nil {
 		return err
 	}
 	var built []*Node

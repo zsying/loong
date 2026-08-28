@@ -1,6 +1,6 @@
 module github.com/zsying/loong
 
-go 1.26.4
+go 1.27
 
 require (
 	github.com/golang-jwt/jwt/v5 v5.3.1

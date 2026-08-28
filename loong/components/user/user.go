@@ -190,5 +190,5 @@ func (c *Component) Stop(*loong.Scope) error {
 }
 
 func init() {
-	loong.Register("user", func() loong.Component { return &Component{} })
+	loong.RegisterComponent("user", func() loong.Component { return &Component{} })
 }

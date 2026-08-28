@@ -45,15 +45,6 @@ type Web struct {
 	users *user.Service
 }
 
-func (w *Web) Register(reg *loong.Registry) error {
-	// Demo subscription: react to events emitted by business children.
-	reg.On("biz.greet.hello", func(e loong.Event) error {
-		slog.Info("event received", "name", e.Name, "source", e.Source, "payload", e.Payload)
-		return nil
-	})
-	return nil
-}
-
 func (w *Web) Build(ctx *loong.Scope) error {
 	var cfg Config
 	if err := ctx.Config.Decode(&cfg); err != nil {
@@ -62,7 +53,13 @@ func (w *Web) Build(ctx *loong.Scope) error {
 	w.cfg = cfg
 	w.mux = http.NewServeMux()
 	ctx.Kernel.Provide(&Router{mux: w.mux})
-	w.users = loong.Get[*user.Service](ctx.Kernel)
+	w.users = ctx.Kernel.Get[*user.Service]()
+
+	// Demo subscription: react to events emitted by business children.
+	ctx.On("biz.greet.hello", func(e loong.Event) error {
+		slog.Info("event received", "name", e.Name, "source", e.Source, "payload", e.Payload)
+		return nil
+	})
 
 	w.mux.HandleFunc("POST /api/auth/register", w.handleRegister)
 	w.mux.HandleFunc("POST /api/auth/login", w.handleLogin)
@@ -182,5 +179,5 @@ func writeJSON(rw http.ResponseWriter, status int, v any) {
 }
 
 func init() {
-	loong.Register("web", func() loong.Component { return &Web{} })
+	loong.RegisterComponent("web", func() loong.Component { return &Web{} })
 }

@@ -1,8 +1,7 @@
 // Package loong provides the loong platform kernel: the component tree
-// model, four-phase lifecycle (Register/Build/Run/Stop), event routing
-// and type-based service lookup. The kernel lives at the repository
-// root, so importing the platform means importing the loong package
-// itself.
+// model, three-phase lifecycle (Build/Run/Stop), event routing and
+// type-based service lookup. The kernel lives at the repository root,
+// so importing the platform means importing the loong package itself.
 package loong
 
 // Event is emitted by a child node and routed to its direct parent.

@@ -36,7 +36,7 @@
 - **单进程单体**：整棵组件树跑在一个进程内，组件间调用零开销，简单可调试。
 - **配置树格式：YAML**，两段式解析（schema-per-component），详见 4.2。
 - **日志：标准库 log/slog**，JSON 输出、级别可配，零外部依赖。
-- **服务查找：泛型 Get[T]()**，Go 类型即 key（不用字符串）。
+- **服务查找：泛型 Kernel.Get[T]()**，Go 类型即 key（不用字符串）。
 - **Web 渠道：标准库 net/http（Go 1.22 方法+路径路由）+ golang-jwt**。
 - **用户存储：modernc.org/sqlite（纯 Go，无 cgo）**，内核留存储接口，后续可换后端。
 - **微信 API：自写最小 HTTP 封装**（code2session / OAuth / 模板消息 / 回调验签），不引入 SDK。
@@ -51,7 +51,7 @@
 | 部署形态 | 单进程单体 |
 | 配置树 | YAML，两段式解析（schema-per-component），支持 `${ENV}` 展开 |
 | 事件协议 | `{Name, Source, Payload}`，直达直接父节点，`On(name, handler)` 订阅 |
-| 服务查找 | 泛型 `Get[T]()`，Go 类型即 key |
+| 服务查找 | 泛型 `Kernel.Get[T]()`，Go 类型即 key |
 | 组件上下文 | `loong.Scope`（刻意避开标准库 `context.Context` 同名冲突） |
 | 日志 | 标准库 log/slog，JSON 输出、级别可配 |
 | 用户存储 | modernc.org/sqlite（纯 Go，无 cgo） |
@@ -119,7 +119,7 @@ Application Root
 - **路由**：事件默认只投递给**直接父节点**；父节点通过 `On(name, handler)` 注册 handler，未注册的事件静默丢弃。子组件发事件时不知道父是谁——不持有父引用，内核负责按树投递。
 - **同步执行**：handler 在内核调度内同步调用，必须快速返回；长任务由组件自行异步化（`go` 或任务队列扩展组件）。渠道回调（如微信消息）由渠道组件内部异步化后再 Emit。
 - **负载自描述**：`Payload` 是不透明值，父组件自行 type-assert——与配置树 schema-per-component 同一哲学：平台零改动即可支持新事件。
-- **订阅端类型安全**：可用泛型辅助 `OnTyped[T](reg, name, handler)` 把 payload 断言为 T（编译期写死期望类型，断言失败返回错误）。事件按字符串名动态分发，接口方法不能有类型参数，故泛型只能封装在订阅端，内核 `Payload` 保持不透明。
+- **订阅端类型安全**：可用泛型方法 `Scope.OnTyped[T](name, handler)` 把 payload 断言为 T（编译期写死期望类型，断言失败返回错误）。事件按字符串名动态分发，路由表本身无法参数化，故泛型封装在订阅端方法（Go 1.27+ 泛型方法），内核 `Payload` 保持不透明。
 - **不做全局事件总线**：兄弟协作仍走共同父节点或服务查找（见上约束）；全局通知需求由根节点组件自行实现。
 
 ### 4.2 组件组装（静态声明 + 动态注册）

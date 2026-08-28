@@ -6,50 +6,15 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Component is the four-phase lifecycle interface every loong
-// component implements: Register (declare event subscriptions),
-// Build (decode config, wire dependencies), Run (start serving),
+// Component is the three-phase lifecycle interface every loong
+// component implements: Build (decode config, wire dependencies,
+// subscribe to child events), Run (start serving),
 // Stop (graceful shutdown, called in reverse Run order).
 // Most components embed Base instead of implementing all phases.
 type Component interface {
-	Register(reg *Registry) error
 	Build(ctx *Scope) error
 	Run(ctx *Scope) error
 	Stop(ctx *Scope) error
-}
-
-// Registry is the handle available during the Register phase.
-// A component uses it to subscribe to events emitted by its children.
-type Registry struct {
-	kernel *Kernel
-	node   *Node
-}
-
-// On subscribes to an event name emitted by any child node.
-// Unregistered events are silently dropped.
-func (r *Registry) On(name string, h Handler) {
-	if r.node.handlers == nil {
-		r.node.handlers = make(map[string]Handler)
-	}
-	r.node.handlers[name] = h
-}
-
-// OnTyped subscribes to an event and type-asserts its payload into T,
-// giving subscribers a compile-time-typed handler while the kernel
-// keeps Event.Payload opaque. Events are dispatched by string name, so
-// generics cannot reach into the routing table itself (interface
-// methods cannot have type parameters); this wrapper moves the
-// assertion to the subscription side where the type is known.
-// It returns an error from the wrapped handler when the payload type
-// does not match T.
-func OnTyped[T any](reg *Registry, name string, h func(T) error) {
-	reg.On(name, func(e Event) error {
-		p, ok := e.Payload.(T)
-		if !ok {
-			return fmt.Errorf("loong: event %q payload is %T, want %T", e.Name, e.Payload, *new(T))
-		}
-		return h(p)
-	})
 }
 
 // Scope carries the node and its raw config block during Build/Run.
@@ -66,4 +31,33 @@ type Scope struct {
 // The component never holds a reference to its parent.
 func (s *Scope) Emit(name string, payload any) error {
 	return s.Kernel.emit(s.Node, Event{Name: name, Source: s.Node.ID, Payload: payload})
+}
+
+// On subscribes to an event name emitted by any child node.
+// Subscription happens during Build, after the node is created but
+// before Run, so handlers are in place before any event fires.
+// Unregistered events are silently dropped.
+func (s *Scope) On(name string, h Handler) {
+	if s.Node.handlers == nil {
+		s.Node.handlers = make(map[string]Handler)
+	}
+	s.Node.handlers[name] = h
+}
+
+// OnTyped subscribes to an event and type-asserts its payload into T,
+// giving subscribers a compile-time-typed handler while the kernel
+// keeps Event.Payload opaque. Events are dispatched by string name, so
+// generics cannot reach into the routing table itself; this wrapper
+// moves the assertion to the subscription side where the type is known.
+// It returns an error from the wrapped handler when the payload type
+// does not match T. Declared as a method on Scope (generic methods are
+// supported from Go 1.27) so callers write scope.OnTyped[T](name, h).
+func (s *Scope) OnTyped[T any](name string, h func(T) error) {
+	s.On(name, func(e Event) error {
+		p, ok := e.Payload.(T)
+		if !ok {
+			return fmt.Errorf("loong: event %q payload is %T, want %T", e.Name, e.Payload, *new(T))
+		}
+		return h(p)
+	})
 }

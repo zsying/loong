@@ -16,7 +16,7 @@ Every new software project starts by re-implementing the same parts: login, conf
 - **Base skeleton component** — embed `loong.Base` and override only the phases you care about; the core interface stays minimal.
 - **Schema-per-component config tree** — the kernel reads only the skeleton (`type` / `id` / `config` / `children`); every component decodes its own opaque `config` block from a YAML file, so config structure grows freely with the components you mount.
 - **Two-way parent-child communication** — config injected downward at build time, events emitted upward at runtime, type-based service lookup as a side channel.
-- **Type-based service lookup** — `loong.Get[T]()`, the Go type itself is the key.
+- **Type-based service lookup** — `ctx.Kernel.Get[T]()`, the Go type itself is the key.
 - **Single-process monolith** — the whole tree runs in one process; simple to debug, zero network overhead between components.
 - **Zero-framework web channel** — stdlib `net/http` (Go 1.22 routing patterns) + JWT.
 
@@ -81,7 +81,7 @@ func (g *greet) Build(ctx *loong.Scope) error {
         return err
     }
     // 2. wire dependencies / register routes through parent services
-    if r := loong.Get[*web.Router](ctx.Kernel); r != nil {
+    if r := ctx.Kernel.Get[*web.Router](); r != nil {
         r.Handle("GET", "/api/greet", func(w http.ResponseWriter, _ *http.Request) {
             _ = g.Emit("biz.greet.hello", "hi") // event flows upward to the parent
             w.Write([]byte("greetings\n"))
