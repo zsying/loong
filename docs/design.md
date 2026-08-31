@@ -60,7 +60,7 @@
 | Web 渠道 | 标准库 net/http + golang-jwt |
 | 微信 API | 自写最小 HTTP 封装（不引入 SDK） |
 | 邮件 / unionid | 扩展组件，v0.1 不实现 |
-| 仓库结构 | 核心在根 loong 包 + components/ + examples/ + docs/ |
+| 仓库结构 | 核心在根 loong 包 + cmd/loong/ + components/ + examples/ + docs/ |
 | v0.1 验收渠道 | Web |
 
 ### 2.2 仓库结构
@@ -68,6 +68,7 @@
 ```
 loong/
 ├── *.go           # 内核（package loong，仓库根即平台核心）
+├── cmd/loong/     # 平台 CLI：list / new / tree，本身是 loong 组件树应用
 ├── components/    # 平台组件：log / user / web（wechat、tui 后续补）
 ├── examples/      # 示例项目（v0.1: hello，跑通 Web 渠道）
 └── docs/          # 设计文档

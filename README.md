@@ -66,6 +66,21 @@ curl localhost:8080/api/greet
 
 Press `Ctrl+C` to shut down gracefully (components are stopped in reverse Run order).
 
+## CLI
+
+`loong` ships a small CLI that is itself a loong application: each subcommand is a component mounted in an embedded config tree (`cmd/loong/cli.yaml`, shipped inline via `go:embed`) and activated on demand.
+
+```bash
+go build -o loong ./cmd/loong
+
+./loong list                # component catalog: services, config keys, events
+./loong list --html         # same, as an HTML table
+./loong new greet           # scaffold a component source file
+./loong tree loong.yaml     # project config tree annotated with services and config
+```
+
+Adding a command means registering a new component type and a node in `cli.yaml` — the dispatch code does not change.
+
 ## Writing a component
 
 ```go

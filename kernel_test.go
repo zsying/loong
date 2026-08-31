@@ -167,6 +167,22 @@ func TestUnknownComponentType(t *testing.T) {
 	}
 }
 
+func TestParse(t *testing.T) {
+	root, err := Parse([]byte("type: test.spy\nid: root\nchildren:\n  - type: test.spy\n    id: c\n    lazy: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if root.Type != "test.spy" || root.ID != "root" {
+		t.Fatalf("root = %+v", root)
+	}
+	if len(root.Children) != 1 || !root.Children[0].Lazy || root.Children[0].ID != "c" {
+		t.Fatalf("child = %+v", root.Children[0])
+	}
+	if _, err := Parse([]byte("type: [broken")); err == nil {
+		t.Fatal("expected parse error for invalid yaml")
+	}
+}
+
 // buildFail fails during Build.
 type buildFail struct {
 	Base
