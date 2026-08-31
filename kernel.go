@@ -11,10 +11,10 @@ import (
 // Kernel assembles and runs the component tree in a single process.
 type Kernel struct {
 	factories   map[string]regEntry
-	services    map[reflect.Type]any
-	serviceIdx  map[reflect.Type]string // service value type -> component type name
-	nodesByType map[string][]*Node      // component type name -> registered nodes
-	idIndex     map[string]*Node        // node id -> node
+	services    map[reflect.Type]map[string]any // service type -> node id -> value
+	serviceIdx  map[reflect.Type]string         // service type -> component type name
+	nodesByType map[string][]*Node              // component type name -> registered nodes
+	idIndex     map[string]*Node                // node id -> node
 	root        *Node
 	mu          sync.Mutex // guards services; activation happens outside it
 }
@@ -25,13 +25,13 @@ func New() *Kernel {
 	idx := make(map[reflect.Type]string)
 	for name, e := range factories {
 		f[name] = e
-		if e.service {
-			idx[e.serviceType] = name
+		for _, sd := range e.services {
+			idx[sd.typ] = name
 		}
 	}
 	return &Kernel{
 		factories:   f,
-		services:    make(map[reflect.Type]any),
+		services:    make(map[reflect.Type]map[string]any),
 		serviceIdx:  idx,
 		nodesByType: make(map[string][]*Node),
 		idIndex:     make(map[string]*Node),
@@ -40,12 +40,12 @@ func New() *Kernel {
 
 // Assemble registers the tree and activates every non-lazy node in two
 // phases: Build (instantiate + wire, parent before child) then Run
-// (start serving, parent before child). Lazy nodes — service components
-// declared via AsService[T], or any node marked lazy in the config
-// tree — are registered only and activated on demand through Get[T]()
-// or Activate. If Build or Run fails, nodes already built are stopped
-// in reverse order so acquired resources (db connections, servers) are
-// released.
+// (start serving, parent before child). Nodes that are marked lazy in
+// the config tree, or that are service components without Eager(), are
+// registered only and activated on demand through Scope.Get/GetFrom or
+// Kernel.Activate. If Build or Run fails, nodes already built are
+// stopped in reverse order so acquired resources (db connections,
+// servers) are released.
 func (k *Kernel) Assemble(root *Node) error {
 	k.root = root
 	if err := k.register(root, nil); err != nil {
@@ -54,12 +54,9 @@ func (k *Kernel) Assemble(root *Node) error {
 	if err := k.checkUniqueIDs(root); err != nil {
 		return err
 	}
-	if err := k.checkServiceUniqueness(); err != nil {
-		return err
-	}
 	var built []*Node
 	if err := k.walk(root, func(n *Node) error {
-		if n.Lazy || k.factories[n.Type].service {
+		if k.lazyByDefault(n) {
 			return nil
 		}
 		if err := k.buildNode(n); err != nil {
@@ -71,7 +68,7 @@ func (k *Kernel) Assemble(root *Node) error {
 		return err
 	}
 	return k.walk(root, func(n *Node) error {
-		if n.Lazy || k.factories[n.Type].service {
+		if k.lazyByDefault(n) {
 			return nil
 		}
 		if err := n.component.Run(&Scope{Kernel: k, Node: n}); err != nil {
@@ -79,6 +76,14 @@ func (k *Kernel) Assemble(root *Node) error {
 		}
 		return nil
 	})
+}
+
+// lazyByDefault reports whether a node is skipped during assembly and
+// activated on demand instead: explicitly marked lazy in the config
+// tree, or a service component that was not registered with Eager().
+func (k *Kernel) lazyByDefault(n *Node) bool {
+	e := k.factories[n.Type]
+	return n.Lazy || (len(e.services) > 0 && !e.eager)
 }
 
 // register walks the tree, filling default ids, setting parent
@@ -103,22 +108,10 @@ func (k *Kernel) register(n *Node, parent *Node) error {
 	return nil
 }
 
-// checkServiceUniqueness enforces that a service component type is
-// mounted exactly once, since service lookup is global per Go type and
-// a duplicate would make Get[T]() ambiguous.
-func (k *Kernel) checkServiceUniqueness() error {
-	for typeName, nodes := range k.nodesByType {
-		if k.factories[typeName].service && len(nodes) > 1 {
-			return fmt.Errorf("loong: service type %q mounted %d times, want exactly one node", typeName, len(nodes))
-		}
-	}
-	return nil
-}
-
 // buildNode instantiates one node and runs its Build phase, then
-// registers any service it provides (ServiceProvider). Run is
-// deliberately kept separate so assembly can wire the whole tree
-// before anything starts serving.
+// registers the services declared via WithService. Run is deliberately
+// kept separate so assembly can wire the whole tree before anything
+// starts serving.
 func (k *Kernel) buildNode(n *Node) error {
 	n.component = k.factories[n.Type].factory()
 	sc := &Scope{Kernel: k, Node: n, Config: n.Config}
@@ -128,45 +121,39 @@ func (k *Kernel) buildNode(n *Node) error {
 	return k.registerService(n)
 }
 
-// registerService stores the value returned by a node's Provide() in
-// the global service table. Only components that implement
-// ServiceProvider are registered; re-registering the same type
-// overwrites the previous value with a warning.
-//
-// The service key is the type declared via AsService[T] when the
-// component type registered one (checked by AssignableTo against the
-// actual Provide() value, so a mismatch fails the node's activation
-// instead of surfacing at lookup time); otherwise it is the dynamic
-// type of the provided value (e.g. the web channel exposing Router
-// without an AsService declaration).
+// registerService evaluates every WithService accessor declared by the
+// node's component type and stores the values in the service table,
+// keyed by type and node id, so multiple providers of the same type
+// (e.g. two web instances) coexist. A nil value fails the activation —
+// the accessor returned before the component was ready.
 func (k *Kernel) registerService(n *Node) error {
-	sp, ok := n.component.(ServiceProvider)
-	if !ok {
+	decls := k.factories[n.Type].services
+	if len(decls) == 0 {
 		return nil
-	}
-	svc := sp.Provide()
-	if svc == nil {
-		return nil
-	}
-	t := reflect.TypeOf(svc)
-	if st := k.factories[n.Type].serviceType; st != nil {
-		if !t.AssignableTo(st) {
-			return fmt.Errorf("loong: service node %q provides %s, want %s", n.ID, t, st)
-		}
-		t = st
 	}
 	k.mu.Lock()
-	if _, exists := k.services[t]; exists {
-		slog.Warn("loong: service type already provided, overwriting", "type", t.String())
+	defer k.mu.Unlock()
+	for _, sd := range decls {
+		v := sd.get(n.component)
+		if isNilValue(v) {
+			return fmt.Errorf("loong: node %q provides nil service for %s", n.ID, sd.typ)
+		}
+		m := k.services[sd.typ]
+		if m == nil {
+			m = make(map[string]any)
+			k.services[sd.typ] = m
+		}
+		if _, exists := m[n.ID]; exists {
+			slog.Warn("loong: service already provided by node, overwriting", "id", n.ID, "type", sd.typ.String())
+		}
+		m[n.ID] = v
 	}
-	k.services[t] = svc
-	k.mu.Unlock()
 	return nil
 }
 
 // ensureActive activates a lazy node exactly once, running the full
 // lifecycle (Build + Run) outside any kernel-wide lock so component
-// code may itself call Get/TryGet for other lazy services without
+// code may itself call Get/GetFrom for other lazy services without
 // deadlocking. The per-node mutex serializes concurrent activations of
 // the same node and caches the outcome for later callers.
 func (k *Kernel) ensureActive(n *Node) error {
@@ -205,6 +192,43 @@ func (k *Kernel) Activate(id string) error {
 		return fmt.Errorf("loong: unknown node %q", id)
 	}
 	return k.ensureActive(n)
+}
+
+// nearestProvider returns the closest node on the chain from the given
+// node upward (itself included) whose component type declares service
+// type t, or nil when the chain holds no such node.
+func (k *Kernel) nearestProvider(from *Node, t reflect.Type) *Node {
+	for n := from; n != nil; n = n.parent {
+		if k.nodeProvides(n, t) {
+			return n
+		}
+	}
+	return nil
+}
+
+// nodeProvides reports whether the node's component type declares
+// service type t via WithService.
+func (k *Kernel) nodeProvides(n *Node, t reflect.Type) bool {
+	for _, sd := range k.factories[n.Type].services {
+		if sd.typ == t {
+			return true
+		}
+	}
+	return false
+}
+
+// isNilValue reports whether v is nil, including a typed nil boxed
+// into an interface (e.g. a nil *T stored in an any).
+func isNilValue(v any) bool {
+	if v == nil {
+		return true
+	}
+	rv := reflect.ValueOf(v)
+	switch rv.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return rv.IsNil()
+	}
+	return false
 }
 
 func (k *Kernel) checkUniqueIDs(root *Node) error {

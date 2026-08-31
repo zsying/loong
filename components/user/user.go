@@ -158,17 +158,13 @@ func (s *Service) scanRow(row *sql.Row) (*User, error) {
 	return &u, nil
 }
 
-// Component is the user system component itself. It exposes its
-// Service through the ServiceProvider interface and is registered with
-// AsService[*Service]() so the node is activated lazily on the first
+// Component is the user system component itself. It is registered
+// with WithService so the node is activated lazily on the first
 // Get[*user.Service]() instead of during assembly.
 type Component struct {
 	loong.Base
 	Service *Service
 }
-
-// Provide returns the user service, registered under its Go type.
-func (c *Component) Provide() any { return c.Service }
 
 func (c *Component) Build(scope *loong.Scope) error {
 	var cfg Config
@@ -195,5 +191,8 @@ func (c *Component) Stop(*loong.Scope) error {
 }
 
 func init() {
-	loong.RegisterComponent("user", func() loong.Component { return &Component{} }, loong.AsService[*Service]())
+	loong.RegisterComponent("user", func() loong.Component { return &Component{} },
+		loong.WithService(func(c loong.Component) *Service { return c.(*Component).Service }),
+		loong.WithDesc("user system: accounts, password auth, openid login"),
+	)
 }

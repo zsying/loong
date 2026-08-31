@@ -52,7 +52,7 @@ func (w *Web) Build(scope *loong.Scope) error {
 	}
 	w.cfg = cfg
 	w.mux = http.NewServeMux()
-	w.users = scope.Kernel.Get[*user.Service]()
+	w.users = scope.Get[*user.Service]()
 
 	// Demo subscription: react to events emitted by business children.
 	scope.On("biz.greet.hello", func(e loong.Event) error {
@@ -68,11 +68,6 @@ func (w *Web) Build(scope *loong.Scope) error {
 	}
 	return nil
 }
-
-// Provide exposes the channel's Router capability to other components.
-// The web node is not lazy (it is a startup channel), so the Router
-// becomes visible to lookups as soon as the web component is built.
-func (w *Web) Provide() any { return &Router{mux: w.mux} }
 
 func (w *Web) Run(scope *loong.Scope) error {
 	slog.Info("web listening", "addr", w.cfg.Listen)
@@ -183,5 +178,9 @@ func writeJSON(rw http.ResponseWriter, status int, v any) {
 }
 
 func init() {
-	loong.RegisterComponent("web", func() loong.Component { return &Web{} })
+	loong.RegisterComponent("web", func() loong.Component { return &Web{} },
+		loong.WithService(func(c loong.Component) *Router { return &Router{mux: c.(*Web).mux} }),
+		loong.Eager(), // a startup channel: run at assembly, not lazily
+		loong.WithDesc("web channel: stdlib HTTP + JWT auth, exposes Router"),
+	)
 }

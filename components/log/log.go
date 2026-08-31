@@ -56,5 +56,7 @@ func (l *Log) Build(scope *loong.Scope) error {
 }
 
 func init() {
-	loong.RegisterComponent("log", func() loong.Component { return &Log{} })
+	loong.RegisterComponent("log", func() loong.Component { return &Log{} },
+		loong.WithDesc("process-wide logging via slog, console/json formats"),
+	)
 }

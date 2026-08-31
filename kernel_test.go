@@ -204,17 +204,26 @@ func TestAssembleFailureCleanup(t *testing.T) {
 	}
 }
 
+// scopeAt builds a Scope rooted at the node with the given id, the way
+// a component's Build would see it. It lets tests drive Scope.Get /
+// Scope.GetFrom against an assembled kernel.
+func scopeAt(k *Kernel, id string) *Scope {
+	n := k.idIndex[id]
+	if n == nil {
+		panic("unknown node " + id)
+	}
+	return &Scope{Kernel: k, Node: n}
+}
+
 // svcValue is a service value exposed by svcProvider.
 type svcValue struct{ n int }
 
-// svcProvider is a service component: it provides svcValue through
-// ServiceProvider and is registered with AsService[*svcValue]().
+// svcProvider is a lazy service component: it declares *svcValue via
+// WithService and is activated on first lookup.
 type svcProvider struct {
 	Base
 	v *svcValue
 }
-
-func (s *svcProvider) Provide() any { return s.v }
 
 func (s *svcProvider) Build(ctx *Scope) error {
 	s.v = &svcValue{n: 42}
@@ -222,7 +231,8 @@ func (s *svcProvider) Build(ctx *Scope) error {
 }
 
 func TestServiceLazyActivation(t *testing.T) {
-	RegisterComponent("test.svc", func() Component { return &svcProvider{} }, AsService[*svcValue]())
+	RegisterComponent("test.svc", func() Component { return &svcProvider{} },
+		WithService(func(c Component) *svcValue { return c.(*svcProvider).v }))
 	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
 	root := &Node{
 		Type: "test.spy", ID: "root",
@@ -238,15 +248,16 @@ func TestServiceLazyActivation(t *testing.T) {
 		t.Fatal("service node should not be activated during assembly")
 	}
 	// First Get activates the node on demand and returns its value.
-	if v := k.Get[*svcValue](); v == nil || v.n != 42 {
+	if v := scopeAt(k, "users").Get[*svcValue](); v == nil || v.n != 42 {
 		t.Fatalf("Get[*svcValue]() = %+v, want &{n:42}", v)
 	}
 	if n := k.idIndex["users"]; n.component == nil {
 		t.Fatal("service node should be activated by Get")
 	}
 	// Subsequent gets hit the cache; no double activation.
-	v1 := k.Get[*svcValue]()
-	v2 := k.Get[*svcValue]()
+	s := scopeAt(k, "users")
+	v1 := s.Get[*svcValue]()
+	v2 := s.Get[*svcValue]()
 	if v1 != v2 {
 		t.Fatal("service should be a singleton across Get calls")
 	}
@@ -263,12 +274,13 @@ type svcUser struct {
 }
 
 func (u *svcUser) Build(ctx *Scope) error {
-	u.got = ctx.Kernel.Get[*svcValue]()
+	u.got = ctx.Get[*svcValue]()
 	return nil
 }
 
 func TestServiceActivatedDuringParentBuild(t *testing.T) {
-	RegisterComponent("test.svc", func() Component { return &svcProvider{} }, AsService[*svcValue]())
+	RegisterComponent("test.svc", func() Component { return &svcProvider{} },
+		WithService(func(c Component) *svcValue { return c.(*svcProvider).v }))
 	RegisterComponent("test.svcuser", func() Component { return &svcUser{} })
 	root := &Node{
 		Type: "test.svcuser", ID: "root",
@@ -281,21 +293,6 @@ func TestServiceActivatedDuringParentBuild(t *testing.T) {
 	u := k.idIndex["root"].component.(*svcUser)
 	if u.got == nil || u.got.n != 42 {
 		t.Fatalf("parent Build did not resolve lazy service, got %+v", u.got)
-	}
-}
-
-func TestServiceUniqueness(t *testing.T) {
-	RegisterComponent("test.svc", func() Component { return &svcProvider{} }, AsService[*svcValue]())
-	root := &Node{
-		Type: "test.spy", ID: "root",
-		Children: []*Node{
-			{Type: "test.svc", ID: "a"},
-			{Type: "test.svc", ID: "b"},
-		},
-	}
-	k := New()
-	if err := k.Assemble(root); err == nil {
-		t.Fatal("expected error for duplicate service nodes")
 	}
 }
 
@@ -344,39 +341,32 @@ func TestLazyNodeActivatedOnDemand(t *testing.T) {
 	}
 }
 
-// svcAlpha is the declared service type of alphaProvider; svcBeta is
-// what alphaProvider actually returns, so activation must fail fast.
-type svcAlpha struct{ n int }
-type svcBeta struct{}
+// nilSvc is the declared service type of nilProvider only, so it does
+// not collide with other tests' registrations.
+type nilSvc struct{}
 
-// alphaProvider declares AsService[*svcAlpha]() but Provide()s a
-// *svcBeta — a contract violation surfaced at activation time.
-type alphaProvider struct {
+// nilProvider declares a service whose accessor returns nil — the
+// accessor ran before the component was ready, so activation must fail.
+type nilProvider struct {
 	Base
 }
 
-func (a *alphaProvider) Provide() any       { return &svcBeta{} }
-func (a *alphaProvider) Build(*Scope) error { return nil }
+func (n *nilProvider) Build(*Scope) error { return nil }
 
-func TestServiceTypeMismatch(t *testing.T) {
-	RegisterComponent("test.alpha", func() Component { return &alphaProvider{} }, AsService[*svcAlpha]())
+func TestNilService(t *testing.T) {
+	RegisterComponent("test.nil", func() Component { return &nilProvider{} },
+		WithService(func(c Component) *nilSvc { return nil }))
 	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
 	root := &Node{
 		Type: "test.spy", ID: "root",
-		Children: []*Node{{Type: "test.alpha", ID: "alpha"}},
+		Children: []*Node{{Type: "test.nil", ID: "n"}},
 	}
 	k := New()
 	if err := k.Assemble(root); err != nil {
 		t.Fatal(err)
 	}
-	// The mismatch must fail the on-demand activation of the service
-	// node, not silently register a wrong-typed service.
-	if _, err := k.TryGet[*svcAlpha](); err == nil {
-		t.Fatal("expected error when Provide() type mismatches AsService declaration")
-	}
-	// Repeated lookups report the cached failure, not re-activate.
-	if _, err := k.TryGet[*svcAlpha](); err == nil {
-		t.Fatal("expected cached activation error on second lookup")
+	if _, err := scopeAt(k, "root").TryGet[*nilSvc](); err == nil {
+		t.Fatal("expected error when a service accessor returns nil")
 	}
 }
 
@@ -431,10 +421,11 @@ type unknownSvc struct{}
 
 func TestGetUnknownService(t *testing.T) {
 	k := New()
-	if v := k.Get[*unknownSvc](); v != nil {
+	s := &Scope{Kernel: k} // no node context
+	if v := s.Get[*unknownSvc](); v != nil {
 		t.Fatalf("Get[*unknownSvc]() = %v, want nil", v)
 	}
-	if _, err := k.TryGet[*unknownSvc](); err == nil {
+	if _, err := s.TryGet[*unknownSvc](); err == nil {
 		t.Fatal("TryGet for unknown service should return an error")
 	}
 }
@@ -443,7 +434,8 @@ func TestGetUnknownService(t *testing.T) {
 // goroutines: the per-node activation mutex must yield exactly one
 // instance that all callers share.
 func TestServiceConcurrentActivation(t *testing.T) {
-	RegisterComponent("test.svc", func() Component { return &svcProvider{} }, AsService[*svcValue]())
+	RegisterComponent("test.svc", func() Component { return &svcProvider{} },
+		WithService(func(c Component) *svcValue { return c.(*svcProvider).v }))
 	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
 	root := &Node{
 		Type: "test.spy", ID: "root",
@@ -460,7 +452,7 @@ func TestServiceConcurrentActivation(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			vals[i] = k.Get[*svcValue]()
+			vals[i] = scopeAt(k, "users").Get[*svcValue]()
 		}(i)
 	}
 	wg.Wait()
@@ -468,5 +460,193 @@ func TestServiceConcurrentActivation(t *testing.T) {
 		if v == nil || v != vals[0] {
 			t.Fatalf("vals[%d] = %v, want the same singleton %v", i, v, vals[0])
 		}
+	}
+}
+
+// routerVal is a per-instance service value; its tag identifies which
+// provider instance produced it.
+type routerVal struct{ tag string }
+
+// routerProv models a startup channel like web: it declares a service
+// and is registered with Eager() so it activates during assembly.
+type routerProv struct {
+	Base
+	v *routerVal
+}
+
+func (r *routerProv) Build(ctx *Scope) error {
+	r.v = &routerVal{tag: ctx.Node.ID}
+	return nil
+}
+
+// routerUser models a business component mounted under a provider; its
+// Build resolves the service and records which provider instance won.
+type routerUser struct {
+	Base
+	got *routerVal
+}
+
+func (u *routerUser) Build(ctx *Scope) error {
+	u.got = ctx.Get[*routerVal]()
+	return nil
+}
+
+func regWebPair() {
+	RegisterComponent("test.web", func() Component { return &routerProv{} },
+		WithService(func(c Component) *routerVal { return c.(*routerProv).v }),
+		Eager())
+	RegisterComponent("test.ruser", func() Component { return &routerUser{} })
+}
+
+// TestMultiInstanceTreePriority mounts two provider instances (main /
+// admin), each with a business child. Each child must resolve the
+// service of its own parent chain — the tree-scoped lookup.
+func TestMultiInstanceTreePriority(t *testing.T) {
+	regWebPair()
+	root := &Node{
+		Type: "test.spy", ID: "root",
+		Children: []*Node{
+			{Type: "test.web", ID: "main", Children: []*Node{
+				{Type: "test.ruser", ID: "bizA"},
+			}},
+			{Type: "test.web", ID: "admin", Children: []*Node{
+				{Type: "test.ruser", ID: "bizB"},
+			}},
+		},
+	}
+	k := New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	bizA := k.idIndex["bizA"].component.(*routerUser)
+	bizB := k.idIndex["bizB"].component.(*routerUser)
+	if bizA.got == nil || bizA.got.tag != "main" {
+		t.Fatalf("bizA resolved %+v, want the main provider", bizA.got)
+	}
+	if bizB.got == nil || bizB.got.tag != "admin" {
+		t.Fatalf("bizB resolved %+v, want the admin provider", bizB.got)
+	}
+}
+
+// TestAmbiguousService mounts two providers with no business child on
+// either chain: a lookup from the root has no matching ancestor and
+// must report an error suggesting GetFrom.
+func TestAmbiguousService(t *testing.T) {
+	regWebPair()
+	root := &Node{
+		Type: "test.spy", ID: "root",
+		Children: []*Node{
+			{Type: "test.web", ID: "a"},
+			{Type: "test.web", ID: "b"},
+		},
+	}
+	k := New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := scopeAt(k, "root").TryGet[*routerVal](); err == nil {
+		t.Fatal("expected ambiguity error from the root lookup")
+	}
+}
+
+// TestGetFrom picks a specific provider instance by node id, even when
+// the caller's chain contains another provider.
+func TestGetFrom(t *testing.T) {
+	regWebPair()
+	root := &Node{
+		Type: "test.spy", ID: "root",
+		Children: []*Node{
+			{Type: "test.web", ID: "main", Children: []*Node{
+				{Type: "test.ruser", ID: "bizA"},
+			}},
+			{Type: "test.web", ID: "admin"},
+		},
+	}
+	k := New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	v := scopeAt(k, "bizA").GetFrom[*routerVal]("admin")
+	if v == nil || v.tag != "admin" {
+		t.Fatalf("GetFrom(admin) = %+v, want the admin provider", v)
+	}
+	if _, err := scopeAt(k, "bizA").TryGetFrom[*routerVal]("missing"); err == nil {
+		t.Fatal("expected error for unknown node id")
+	}
+}
+
+// multiProv exposes two services from one component type.
+type svcX struct{ n int }
+type svcY struct{ s string }
+
+type multiProv struct {
+	Base
+	x *svcX
+	y *svcY
+}
+
+func (m *multiProv) Build(*Scope) error {
+	m.x = &svcX{n: 1}
+	m.y = &svcY{s: "y"}
+	return nil
+}
+
+func TestMultipleServices(t *testing.T) {
+	RegisterComponent("test.multi", func() Component { return &multiProv{} },
+		WithService(func(c Component) *svcX { return c.(*multiProv).x }),
+		WithService(func(c Component) *svcY { return c.(*multiProv).y }))
+	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	root := &Node{
+		Type: "test.spy", ID: "root",
+		Children: []*Node{{Type: "test.multi", ID: "m"}},
+	}
+	k := New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	s := scopeAt(k, "root")
+	vx := s.Get[*svcX]()
+	vy := s.Get[*svcY]()
+	if vx == nil || vx.n != 1 || vy == nil || vy.s != "y" {
+		t.Fatalf("multiple services not both resolved: x=%+v y=%+v", vx, vy)
+	}
+}
+
+// catSvc / catProv are used only by TestComponentsCatalog, so their
+// service declaration does not collide with other tests.
+type catSvc struct{}
+
+type catProv struct {
+	Base
+}
+
+func (c *catProv) Build(*Scope) error { return nil }
+
+// TestComponentsCatalog verifies the discovery metadata exposes type
+// names, service flags, eager mode, events and descriptions.
+func TestComponentsCatalog(t *testing.T) {
+	RegisterComponent("test.cat", func() Component { return &catProv{} },
+		WithService(func(c Component) *catSvc { return &catSvc{} }),
+		WithEvents("test.one", "test.*"),
+		WithDesc("a catalog entry"))
+	infos := Components()
+	var found *ComponentMeta
+	for i := range infos {
+		if infos[i].Type == "test.cat" {
+			found = &infos[i]
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("test.cat not listed in Components()")
+	}
+	if !found.Service || found.Eager {
+		t.Errorf("meta = %+v, want Service=true Eager=false", found)
+	}
+	if len(found.Emits) != 2 || found.Emits[1] != "test.*" {
+		t.Errorf("emits = %v, want [test.one test.*]", found.Emits)
+	}
+	if found.Desc != "a catalog entry" {
+		t.Errorf("desc = %q", found.Desc)
 	}
 }

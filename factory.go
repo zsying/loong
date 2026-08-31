@@ -1,42 +1,127 @@
 package loong
 
-import "reflect"
+import (
+	"log/slog"
+	"reflect"
+)
+
+// serviceDecl pairs a declared service type with the accessor that
+// pulls the value out of a component instance after it is built.
+type serviceDecl struct {
+	typ reflect.Type
+	get func(Component) any
+}
 
 // regEntry describes one registered component type: its factory plus
-// optional registration semantics.
+// optional registration semantics (services, activation mode, events,
+// description).
 type regEntry struct {
-	factory     func() Component
-	service     bool         // declared as a lazily-activated service component
-	serviceType reflect.Type // service value type declared via AsService[T]
+	factory  func() Component
+	services []serviceDecl // services declared via WithService (may be several)
+	eager    bool          // activated at assembly instead of lazily (Eager)
+	emits    []string      // event names this component emits (WithEvents)
+	desc     string        // human description for the component catalog (WithDesc)
 }
 
 // factories holds component type factories registered via init().
 var factories = map[string]regEntry{}
 
+// serviceOwners tracks which component type declares each service
+// type, to warn when two component types claim the same service type
+// (the lookup index keeps only one of them).
+var serviceOwners = map[reflect.Type]string{}
+
 // ComponentOption tweaks how a component type is registered.
 type ComponentOption func(*regEntry)
 
-// AsService declares that instances of this component type expose a
-// service of type T through the ServiceProvider interface, and that
-// the node is activated lazily: it is instantiated, built and run on
-// the first Get[T]() (or Kernel.Activate) instead of during assembly.
-// Only one node of a service component type may be mounted, because
-// service lookup is global and unique per Go type.
-func AsService[T any]() ComponentOption {
+// WithService declares that instances of this component type expose a
+// service of type T, and binds the accessor that extracts it from a
+// built instance:
+//
+//	loong.RegisterComponent("user", factory,
+//	    loong.WithService(func(c loong.Component) *Service { return c.(*Component).Service }),
+//	)
+//
+// A component may declare several services (one WithService each).
+// Service components are activated lazily by default — their node is
+// instantiated, built and run on the first lookup — unless Eager()
+// marks them for startup activation. The accessor's return type is
+// checked at compile time by the generic parameter, so no runtime type
+// assertion is needed.
+func WithService[T any](get func(Component) T) ComponentOption {
 	return func(e *regEntry) {
-		e.service = true
-		e.serviceType = reflect.TypeOf((*T)(nil)).Elem()
+		e.services = append(e.services, serviceDecl{
+			typ: reflect.TypeOf((*T)(nil)).Elem(),
+			get: func(c Component) any { return get(c) },
+		})
 	}
+}
+
+// Eager marks the component type for startup activation, overriding
+// the default lazy activation of service components. Use it for
+// channels and other components that must be running as soon as the
+// tree is assembled even though they expose a service (e.g. web).
+func Eager() ComponentOption {
+	return func(e *regEntry) { e.eager = true }
+}
+
+// WithEvents declares the event names this component emits. Names may
+// end in ".*" to denote a domain prefix (e.g. "user.*"). The list is
+// surfaced by Components() for discoverability.
+func WithEvents(names ...string) ComponentOption {
+	return func(e *regEntry) { e.emits = names }
+}
+
+// WithDesc attaches a one-line human description of the component,
+// surfaced by Components() for discoverability.
+func WithDesc(desc string) ComponentOption {
+	return func(e *regEntry) { e.desc = desc }
 }
 
 // RegisterComponent declares a component type factory. Components call
 // this from their init() so the kernel can instantiate them by type
-// name found in the config tree. Optional ComponentOptions (e.g.
-// AsService[T]) adjust the registration semantics.
+// name found in the config tree. Optional ComponentOptions declare
+// services (WithService), activation mode (Eager), emitted events
+// (WithEvents) and a description (WithDesc).
 func RegisterComponent(typeName string, factory func() Component, opts ...ComponentOption) {
 	e := regEntry{factory: factory}
 	for _, o := range opts {
 		o(&e)
 	}
+	for _, sd := range e.services {
+		if prev, ok := serviceOwners[sd.typ]; ok && prev != typeName {
+			slog.Warn("loong: service type already declared by another component type",
+				"type", sd.typ.String(), "prev", prev, "now", typeName)
+		}
+		serviceOwners[sd.typ] = typeName
+	}
 	factories[typeName] = e
+}
+
+// ComponentMeta is the discoverable metadata of one registered
+// component type, returned by Components().
+type ComponentMeta struct {
+	Type    string   // type name used in the config tree
+	Desc    string   // WithDesc description
+	Service bool     // exposes at least one service
+	Eager   bool     // activated at assembly (service components are lazy by default)
+	Emits   []string // event names declared via WithEvents
+}
+
+// Components returns metadata for every init()-registered component
+// type. It is the discovery entry point for using loong at scale:
+// pick a type name for the config tree, then go doc the exported
+// service types for their interfaces.
+func Components() []ComponentMeta {
+	out := make([]ComponentMeta, 0, len(factories))
+	for name, e := range factories {
+		out = append(out, ComponentMeta{
+			Type:    name,
+			Desc:    e.desc,
+			Service: len(e.services) > 0,
+			Eager:   e.eager,
+			Emits:   e.emits,
+		})
+	}
+	return out
 }

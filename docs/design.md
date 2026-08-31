@@ -36,7 +36,7 @@
 - **单进程单体**：整棵组件树跑在一个进程内，组件间调用零开销，简单可调试。
 - **配置树格式：YAML**，两段式解析（schema-per-component），详见 4.2。
 - **日志：标准库 log/slog**，console（彩色文本，默认）/ json 双格式、级别可配，零外部依赖。
-- **服务查找：泛型 Kernel.Get[T]()**，Go 类型即 key（不用字符串）。
+- **服务查找：Scope.Get[T]()** 树优先级（唯一提供者或父链最近），Go 类型即 key（不用字符串）。
 - **Web 渠道：标准库 net/http（Go 1.22 方法+路径路由）+ golang-jwt**。
 - **用户存储：modernc.org/sqlite（纯 Go，无 cgo）**，内核留存储接口，后续可换后端。
 - **微信 API：自写最小 HTTP 封装**（code2session / OAuth / 模板消息 / 回调验签），不引入 SDK。
@@ -51,8 +51,8 @@
 | 部署形态 | 单进程单体 |
 | 配置树 | YAML，两段式解析（schema-per-component），支持 `${ENV}` 展开 |
 | 事件协议 | `{Name, Source, Payload}`，直达直接父节点，`On(name, handler)` 订阅 |
-| 服务查找 | 泛型 `Kernel.Get[T]()` / `TryGet[T]()`，Go 类型即 key；service 组件按需惰性激活 |
-| 服务组件 | 组件实现 `ServiceProvider.Provide()` + 注册选项 `AsService[T]`；全局唯一、首次 Get 才激活 |
+| 服务查找 | `Scope.Get[T]()` 树优先级（唯一提供者或父链最近；歧义提示 `GetFrom[T](id)`），Go 类型即 key |
+| 服务组件 | 注册选项 `WithService[T](get)`（可多个）+ `Eager()`；默认惰性、多实例并存 |
 | 组件上下文 | `loong.Scope`（刻意避开标准库 `context.Context` 同名冲突） |
 | 日志 | 标准库 log/slog，console（彩色）/ json 双格式、级别可配 |
 | 用户存储 | modernc.org/sqlite（纯 Go，无 cgo） |
@@ -126,7 +126,7 @@ Application Root
 ### 4.2 组件组装（静态声明 + 动态注册）
 
 - **配置树**声明结构：谁挂在哪、父给什么配置。
-- **init() 自注册**声明类型：组件类型自己向内核注册（可用 `AsService[T]` 选项声明为惰性服务组件）。
+- **init() 自注册**声明类型：组件类型自己向内核注册；注册选项声明服务（`WithService[T](get)`，可多个）、激活模式（`Eager()`）、发出的事件（`WithEvents`）与描述（`WithDesc`）。
 - **装配器**流程（登记 / 激活两阶段）：读配置树 → 登记（类型校验、id 填充与查重、建索引——零实例化）→ 激活必需节点（非 lazy 节点按 build / run 两阶段启动，先父后子）→ 运行期按需激活 lazy / service 节点；Shutdown 对已激活节点按 Run 的逆序调 Stop，未激活节点跳过。
 - **一键启动**：`loong.LoadAndRun(path, loong.WithWait())` 合并“读配置树 → 登记 → 激活 → 运行”，`WithWait` 时阻塞到 SIGINT/SIGTERM 再优雅关闭；底层 `LoadTree` / `New` / `Assemble` 仍可直接调用（测试、嵌入式场景）。
 - **Base 骨架**：loong 包提供可嵌入的 Base（空默认三方法 + Scope + Emit / Logger），组件嵌入后只需覆盖关心的阶段——核心接口保持最小，复杂度按需覆盖。
@@ -140,7 +140,7 @@ Application Root
 | Run | Build 成功后（先父后子） | 启动服务（先接线后点火） |
 | Stop | Shutdown 时按 Run 逆序（子先父后） | 优雅关闭（关 server / db / flush） |
 
-**惰性与按需激活**：配置树节点可用 `lazy: true` 声明延迟加载；注册为 service 的组件（`AsService[T]`）默认惰性。登记阶段只校验与建索引，不实例化；惰性节点在首次 `Get[T]()`（service）或 `Kernel.Activate(id)` 时被激活。装配期激活保持"先全树 Build 再全树 Run"；惰性路径是"实例化 + Build + Run 一体"，依赖 DAG 由 Build 期的 Get 推导（父组件 Build 时 Get 懒服务 → 先激活服务再继续），天然"先依赖后依赖方"，同时消除了对配置树声明顺序的依赖。激活由内核互斥保证单例幂等。
+**惰性与按需激活**：配置树节点可用 `lazy: true` 声明延迟加载；声明了服务（`WithService`）且未标 `Eager()` 的组件默认惰性。登记阶段只校验与建索引，不实例化；惰性节点在首次 `Get[T]()`（service）或 `Kernel.Activate(id)` 时被激活。装配期激活保持"先全树 Build 再全树 Run"；惰性路径是"实例化 + Build + Run 一体"，依赖 DAG 由 Build 期的 Get 推导（父组件 Build 时 Get 懒服务 → 先激活服务再继续），天然"先依赖后依赖方"，同时消除了对配置树声明顺序的依赖。激活由内核互斥保证单例幂等。
 
 **配置树设计（YAML · 两段式解析）**：
 
@@ -185,7 +185,7 @@ children:
 - **多实例机制**：配置树里声明多个同 type 节点即可（id 唯一，缺省 id = type）；init() 注册的类型工厂每次调用返回**新实例**，各实例的 config / 事件 / 生命周期完全独立。
 - 实例配置 = 父链默认值 + 父节点覆盖 + 实例自身声明。
 - 例：用户体系在 Web 下表现为会话登录，在小程序下表现为 openid 登录；日志在 API 下输出 JSON、在 TUI 下输出 ANSI 彩色——组件本身不改，读父链下发的配置 / 角色决定行为。
-- **服务提供的约定**：服务查找是全局的（按 Go 类型唯一）。组件可选实现 `ServiceProvider.Provide() any`，Build 成功后内核把返回值按 Go 类型登记，供 `Get[T]()` 查找；重复提供同类型会覆盖并告警。**service 组件**用注册选项声明：`loong.RegisterComponent(name, factory, loong.AsService[T]())` 表示"本类型提供 T 服务且惰性激活"——首次 `Get[T]()`（或 `Activate`）才实例化 + Build + Run，适合重活组件（开库 / 连网）；**服务 key 取声明的 T**，激活时用 `AssignableTo` 校验 `Provide()` 返回值类型一致，不一致直接激活失败（错误提前到激活期而非使用期）；启动即需的渠道组件（如 web）不标 `AsService`，Build 时照常提供能力（Router 等），key 取返回值动态类型。service 组件在配置树中**同 type 只能挂一个实例**（查找全局唯一，装配时检查）。查找失败 / 惰性激活失败用 `TryGet[T]() (T, error)` 报告，`Get[T]()` 保持零值语义；`Activate(id)` 可手动激活任意 lazy 节点。
+- **服务提供的约定**：服务的**唯一声明入口**是注册选项 `WithService[T](get)`——`get` 是取值函数，激活后从组件实例取出服务值，类型由泛型参数编译期固定（无 `any`、无运行期校验）。一个组件可声明多个服务（多次 `WithService`）。服务按「类型 → 节点 id」登记，**同类型允许多个提供者并存**（如 main / admin 两个 web 实例），不再有装配期唯一性约束。查找只通过 `Scope`：`scope.Get[T]()` 在唯一提供者时直接命中；多提供者时沿「自身 + 父链向上」取最近的声明者（组件挂在哪就属于哪，契合重用组件的父子约定），父链无匹配则报错提示 `GetFrom[T](id)` 按节点 id 显式取。惰性激活遵循同一优先级：多候选时只激活父链命中的节点。服务组件（声明了 `WithService`）默认惰性，`Eager()` 覆盖为启动激活（渠道如 web）；`TryGet / TryGetFrom` 报告错误，`Get / GetFrom` 返回零值；`Activate(id)` 可手动激活任意 lazy 节点。组件发现用 `loong.Components()`（type / desc / service / eager / emits 元数据）。
 - **装配失败清理**：Build / Run 阶段任一组件失败，已 Build 的组件会按逆序 Stop（释放 db / server 等资源），`Shutdown` 在未装配或装配失败后调用均为安全空操作。
 - **约束**：组件的可变部分必须走配置 / 接口，不能写死全局状态。
 
