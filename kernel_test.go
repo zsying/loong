@@ -342,6 +342,42 @@ func TestLazyNodeActivatedOnDemand(t *testing.T) {
 	}
 }
 
+// svcAlpha is the declared service type of alphaProvider; svcBeta is
+// what alphaProvider actually returns, so activation must fail fast.
+type svcAlpha struct{ n int }
+type svcBeta struct{}
+
+// alphaProvider declares AsService[*svcAlpha]() but Provide()s a
+// *svcBeta — a contract violation surfaced at activation time.
+type alphaProvider struct {
+	Base
+}
+
+func (a *alphaProvider) Provide() any       { return &svcBeta{} }
+func (a *alphaProvider) Build(*Scope) error { return nil }
+
+func TestServiceTypeMismatch(t *testing.T) {
+	RegisterComponent("test.alpha", func() Component { return &alphaProvider{} }, AsService[*svcAlpha]())
+	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	root := &Node{
+		Type: "test.spy", ID: "root",
+		Children: []*Node{{Type: "test.alpha", ID: "alpha"}},
+	}
+	k := New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	// The mismatch must fail the on-demand activation of the service
+	// node, not silently register a wrong-typed service.
+	if _, err := k.TryGet[*svcAlpha](); err == nil {
+		t.Fatal("expected error when Provide() type mismatches AsService declaration")
+	}
+	// Repeated lookups report the cached failure, not re-activate.
+	if _, err := k.TryGet[*svcAlpha](); err == nil {
+		t.Fatal("expected cached activation error on second lookup")
+	}
+}
+
 // unknownSvc is never registered; lookups must return zero/error.
 type unknownSvc struct{}
 

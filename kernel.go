@@ -116,39 +116,52 @@ func (k *Kernel) checkServiceUniqueness() error {
 }
 
 // buildNode instantiates one node and runs its Build phase, then
-// registers any service it provides (ServiceProvider) under its value
-// type. Run is deliberately kept separate so assembly can wire the
-// whole tree before anything starts serving.
+// registers any service it provides (ServiceProvider). Run is
+// deliberately kept separate so assembly can wire the whole tree
+// before anything starts serving.
 func (k *Kernel) buildNode(n *Node) error {
 	n.component = k.factories[n.Type].factory()
 	sc := &Scope{Kernel: k, Node: n, Config: n.Config}
 	if err := n.component.Build(sc); err != nil {
 		return err
 	}
-	k.registerService(n)
-	return nil
+	return k.registerService(n)
 }
 
 // registerService stores the value returned by a node's Provide() in
-// the global service table, keyed by its Go type. Only components that
-// implement ServiceProvider are registered; re-registering the same
-// type overwrites the previous value with a warning.
-func (k *Kernel) registerService(n *Node) {
+// the global service table. Only components that implement
+// ServiceProvider are registered; re-registering the same type
+// overwrites the previous value with a warning.
+//
+// The service key is the type declared via AsService[T] when the
+// component type registered one (checked by AssignableTo against the
+// actual Provide() value, so a mismatch fails the node's activation
+// instead of surfacing at lookup time); otherwise it is the dynamic
+// type of the provided value (e.g. the web channel exposing Router
+// without an AsService declaration).
+func (k *Kernel) registerService(n *Node) error {
 	sp, ok := n.component.(ServiceProvider)
 	if !ok {
-		return
+		return nil
 	}
 	svc := sp.Provide()
 	if svc == nil {
-		return
+		return nil
 	}
 	t := reflect.TypeOf(svc)
+	if st := k.factories[n.Type].serviceType; st != nil {
+		if !t.AssignableTo(st) {
+			return fmt.Errorf("loong: service node %q provides %s, want %s", n.ID, t, st)
+		}
+		t = st
+	}
 	k.mu.Lock()
 	if _, exists := k.services[t]; exists {
 		slog.Warn("loong: service type already provided, overwriting", "type", t.String())
 	}
 	k.services[t] = svc
 	k.mu.Unlock()
+	return nil
 }
 
 // ensureActive activates a lazy node exactly once, running the full
@@ -168,7 +181,10 @@ func (k *Kernel) ensureActive(n *Node) error {
 		n.actDone, n.actErr = true, err
 		return err
 	}
-	k.registerService(n)
+	if err := k.registerService(n); err != nil {
+		n.actDone, n.actErr = true, err
+		return err
+	}
 	if err := n.component.Run(sc); err != nil {
 		n.actDone, n.actErr = true, err
 		return err

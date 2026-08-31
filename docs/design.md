@@ -185,7 +185,7 @@ children:
 - **多实例机制**：配置树里声明多个同 type 节点即可（id 唯一，缺省 id = type）；init() 注册的类型工厂每次调用返回**新实例**，各实例的 config / 事件 / 生命周期完全独立。
 - 实例配置 = 父链默认值 + 父节点覆盖 + 实例自身声明。
 - 例：用户体系在 Web 下表现为会话登录，在小程序下表现为 openid 登录；日志在 API 下输出 JSON、在 TUI 下输出 ANSI 彩色——组件本身不改，读父链下发的配置 / 角色决定行为。
-- **服务提供的约定**：服务查找是全局的（按 Go 类型唯一）。组件可选实现 `ServiceProvider.Provide() any`，Build 成功后内核把返回值按 Go 类型登记，供 `Get[T]()` 查找；重复提供同类型会覆盖并告警。**service 组件**用注册选项声明：`loong.RegisterComponent(name, factory, loong.AsService[T]())` 表示"本类型提供 T 服务且惰性激活"——首次 `Get[T]()`（或 `Activate`）才实例化 + Build + Run，适合重活组件（开库 / 连网）；启动即需的渠道组件（如 web）不标 `AsService`，Build 时照常提供能力（Router 等），激活即对查找可见。service 组件在配置树中**同 type 只能挂一个实例**（查找全局唯一，装配时检查）。查找失败 / 惰性激活失败用 `TryGet[T]() (T, error)` 报告，`Get[T]()` 保持零值语义；`Activate(id)` 可手动激活任意 lazy 节点。
+- **服务提供的约定**：服务查找是全局的（按 Go 类型唯一）。组件可选实现 `ServiceProvider.Provide() any`，Build 成功后内核把返回值按 Go 类型登记，供 `Get[T]()` 查找；重复提供同类型会覆盖并告警。**service 组件**用注册选项声明：`loong.RegisterComponent(name, factory, loong.AsService[T]())` 表示"本类型提供 T 服务且惰性激活"——首次 `Get[T]()`（或 `Activate`）才实例化 + Build + Run，适合重活组件（开库 / 连网）；**服务 key 取声明的 T**，激活时用 `AssignableTo` 校验 `Provide()` 返回值类型一致，不一致直接激活失败（错误提前到激活期而非使用期）；启动即需的渠道组件（如 web）不标 `AsService`，Build 时照常提供能力（Router 等），key 取返回值动态类型。service 组件在配置树中**同 type 只能挂一个实例**（查找全局唯一，装配时检查）。查找失败 / 惰性激活失败用 `TryGet[T]() (T, error)` 报告，`Get[T]()` 保持零值语义；`Activate(id)` 可手动激活任意 lazy 节点。
 - **装配失败清理**：Build / Run 阶段任一组件失败，已 Build 的组件会按逆序 Stop（释放 db / server 等资源），`Shutdown` 在未装配或装配失败后调用均为安全空操作。
 - **约束**：组件的可变部分必须走配置 / 接口，不能写死全局状态。
 
