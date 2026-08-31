@@ -201,3 +201,188 @@ func TestAssembleFailureCleanup(t *testing.T) {
 		t.Fatalf("shutdown before assemble: %v", err)
 	}
 }
+
+// svcValue is a service value exposed by svcProvider.
+type svcValue struct{ n int }
+
+// svcProvider is a service component: it provides svcValue through
+// ServiceProvider and is registered with AsService[*svcValue]().
+type svcProvider struct {
+	Base
+	v *svcValue
+}
+
+func (s *svcProvider) Provide() any { return s.v }
+
+func (s *svcProvider) Build(ctx *Scope) error {
+	s.v = &svcValue{n: 42}
+	return nil
+}
+
+func TestServiceLazyActivation(t *testing.T) {
+	RegisterComponent("test.svc", func() Component { return &svcProvider{} }, AsService[*svcValue]())
+	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	root := &Node{
+		Type: "test.spy", ID: "root",
+		Children: []*Node{{Type: "test.svc", ID: "users"}},
+	}
+	k := New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	// The service node must stay inactive after assembly: no instance,
+	// so no SQLite open / network connect happens at startup.
+	if n := k.idIndex["users"]; n.component != nil {
+		t.Fatal("service node should not be activated during assembly")
+	}
+	// First Get activates the node on demand and returns its value.
+	if v := k.Get[*svcValue](); v == nil || v.n != 42 {
+		t.Fatalf("Get[*svcValue]() = %+v, want &{n:42}", v)
+	}
+	if n := k.idIndex["users"]; n.component == nil {
+		t.Fatal("service node should be activated by Get")
+	}
+	// Subsequent gets hit the cache; no double activation.
+	v1 := k.Get[*svcValue]()
+	v2 := k.Get[*svcValue]()
+	if v1 != v2 {
+		t.Fatal("service should be a singleton across Get calls")
+	}
+	if err := k.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// svcUser is a regular component whose Build looks up a lazy service,
+// mirroring how the web channel consumes the user service.
+type svcUser struct {
+	Base
+	got *svcValue
+}
+
+func (u *svcUser) Build(ctx *Scope) error {
+	u.got = ctx.Kernel.Get[*svcValue]()
+	return nil
+}
+
+func TestServiceActivatedDuringParentBuild(t *testing.T) {
+	RegisterComponent("test.svc", func() Component { return &svcProvider{} }, AsService[*svcValue]())
+	RegisterComponent("test.svcuser", func() Component { return &svcUser{} })
+	root := &Node{
+		Type: "test.svcuser", ID: "root",
+		Children: []*Node{{Type: "test.svc", ID: "users"}},
+	}
+	k := New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	u := k.idIndex["root"].component.(*svcUser)
+	if u.got == nil || u.got.n != 42 {
+		t.Fatalf("parent Build did not resolve lazy service, got %+v", u.got)
+	}
+}
+
+func TestServiceUniqueness(t *testing.T) {
+	RegisterComponent("test.svc", func() Component { return &svcProvider{} }, AsService[*svcValue]())
+	root := &Node{
+		Type: "test.spy", ID: "root",
+		Children: []*Node{
+			{Type: "test.svc", ID: "a"},
+			{Type: "test.svc", ID: "b"},
+		},
+	}
+	k := New()
+	if err := k.Assemble(root); err == nil {
+		t.Fatal("expected error for duplicate service nodes")
+	}
+}
+
+// lazyComp counts its Build invocations to verify on-demand activation.
+type lazyComp struct {
+	Base
+	builds *int
+}
+
+func (l *lazyComp) Build(*Scope) error { *l.builds++; return nil }
+
+func TestLazyNodeActivatedOnDemand(t *testing.T) {
+	var builds int
+	RegisterComponent("test.lazy", func() Component { return &lazyComp{builds: &builds} })
+	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	root := &Node{
+		Type: "test.spy", ID: "root",
+		Children: []*Node{{Type: "test.lazy", ID: "opt", Lazy: true}},
+	}
+	k := New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	if builds != 0 {
+		t.Fatalf("lazy node built during assembly: %d builds", builds)
+	}
+	if err := k.Activate("opt"); err != nil {
+		t.Fatal(err)
+	}
+	if builds != 1 {
+		t.Fatalf("after Activate: %d builds, want 1", builds)
+	}
+	// Activate is idempotent.
+	if err := k.Activate("opt"); err != nil {
+		t.Fatal(err)
+	}
+	if builds != 1 {
+		t.Fatalf("after second Activate: %d builds, want 1", builds)
+	}
+	// Unknown id is an error; Shutdown skips never-activated nodes.
+	if err := k.Activate("missing"); err == nil {
+		t.Fatal("expected error for unknown node id")
+	}
+	if err := k.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// unknownSvc is never registered; lookups must return zero/error.
+type unknownSvc struct{}
+
+func TestGetUnknownService(t *testing.T) {
+	k := New()
+	if v := k.Get[*unknownSvc](); v != nil {
+		t.Fatalf("Get[*unknownSvc]() = %v, want nil", v)
+	}
+	if _, err := k.TryGet[*unknownSvc](); err == nil {
+		t.Fatal("TryGet for unknown service should return an error")
+	}
+}
+
+// TestServiceConcurrentActivation races the first Get from many
+// goroutines: the per-node activation mutex must yield exactly one
+// instance that all callers share.
+func TestServiceConcurrentActivation(t *testing.T) {
+	RegisterComponent("test.svc", func() Component { return &svcProvider{} }, AsService[*svcValue]())
+	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	root := &Node{
+		Type: "test.spy", ID: "root",
+		Children: []*Node{{Type: "test.svc", ID: "users"}},
+	}
+	k := New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	const n = 16
+	vals := make([]*svcValue, n)
+	var wg sync.WaitGroup
+	for i := range vals {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			vals[i] = k.Get[*svcValue]()
+		}(i)
+	}
+	wg.Wait()
+	for i, v := range vals {
+		if v == nil || v != vals[0] {
+			t.Fatalf("vals[%d] = %v, want the same singleton %v", i, v, vals[0])
+		}
+	}
+}

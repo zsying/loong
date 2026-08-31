@@ -19,7 +19,7 @@ type Base struct {
 	Scope *Scope
 }
 
-func (b *Base) Build(ctx *Scope) error { b.Scope = ctx; return nil }
+func (b *Base) Build(scope *Scope) error { b.Scope = scope; return nil }
 func (b *Base) Run(*Scope) error         { return nil }
 func (b *Base) Stop(*Scope) error        { return nil }
 

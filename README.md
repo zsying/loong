@@ -17,7 +17,8 @@ Every new software project starts by re-implementing the same parts: login, conf
 - **One-call bootstrap** — `loong.LoadAndRun(path, loong.WithWait())` loads the config tree, assembles and runs the whole tree, then optionally blocks for a SIGINT/SIGTERM shutdown signal.
 - **Schema-per-component config tree** — the kernel reads only the skeleton (`type` / `id` / `config` / `children`); every component decodes its own opaque `config` block from a YAML file, so config structure grows freely with the components you mount.
 - **Two-way parent-child communication** — config injected downward at build time, events emitted upward at runtime, type-based service lookup as a side channel.
-- **Type-based service lookup** — `ctx.Kernel.Get[T]()`, the Go type itself is the key.
+- **Type-based service lookup** — `ctx.Kernel.Get[T]()`, the Go type itself is the key; components exposing a service implement `Provide() any` and are registered with `loong.AsService[T]()`.
+- **Lazy activation** — assembly registers the tree without instantiating anything; only required components are built and run at startup, while service components and nodes marked `lazy: true` are activated on first use (`Get[T]()` / `Kernel.Activate`).
 - **Single-process monolith** — the whole tree runs in one process; simple to debug, zero network overhead between components.
 - **Zero-framework web channel** — stdlib `net/http` (Go 1.22 routing patterns) + JWT.
 

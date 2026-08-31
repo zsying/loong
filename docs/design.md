@@ -51,7 +51,8 @@
 | 部署形态 | 单进程单体 |
 | 配置树 | YAML，两段式解析（schema-per-component），支持 `${ENV}` 展开 |
 | 事件协议 | `{Name, Source, Payload}`，直达直接父节点，`On(name, handler)` 订阅 |
-| 服务查找 | 泛型 `Kernel.Get[T]()`，Go 类型即 key |
+| 服务查找 | 泛型 `Kernel.Get[T]()` / `TryGet[T]()`，Go 类型即 key；service 组件按需惰性激活 |
+| 服务组件 | 组件实现 `ServiceProvider.Provide()` + 注册选项 `AsService[T]`；全局唯一、首次 Get 才激活 |
 | 组件上下文 | `loong.Scope`（刻意避开标准库 `context.Context` 同名冲突） |
 | 日志 | 标准库 log/slog，console（彩色）/ json 双格式、级别可配 |
 | 用户存储 | modernc.org/sqlite（纯 Go，无 cgo） |
@@ -125,9 +126,9 @@ Application Root
 ### 4.2 组件组装（静态声明 + 动态注册）
 
 - **配置树**声明结构：谁挂在哪、父给什么配置。
-- **init() 自注册**声明类型：组件类型自己向内核注册。
-- **装配器**流程：读配置树 → 实例化组件 → 注入下行配置 → 接好事件 → 按 build / run / stop 三阶段启动；Shutdown 按 Run 的逆序调 Stop。
-- **一键启动**：`loong.LoadAndRun(path, loong.WithWait())` 合并“读配置树 → 实例化 → Build → Run”，`WithWait` 时阻塞到 SIGINT/SIGTERM 再优雅关闭；底层 `LoadTree` / `New` / `Assemble` 仍可直接调用（测试、嵌入式场景）。
+- **init() 自注册**声明类型：组件类型自己向内核注册（可用 `AsService[T]` 选项声明为惰性服务组件）。
+- **装配器**流程（登记 / 激活两阶段）：读配置树 → 登记（类型校验、id 填充与查重、建索引——零实例化）→ 激活必需节点（非 lazy 节点按 build / run 两阶段启动，先父后子）→ 运行期按需激活 lazy / service 节点；Shutdown 对已激活节点按 Run 的逆序调 Stop，未激活节点跳过。
+- **一键启动**：`loong.LoadAndRun(path, loong.WithWait())` 合并“读配置树 → 登记 → 激活 → 运行”，`WithWait` 时阻塞到 SIGINT/SIGTERM 再优雅关闭；底层 `LoadTree` / `New` / `Assemble` 仍可直接调用（测试、嵌入式场景）。
 - **Base 骨架**：loong 包提供可嵌入的 Base（空默认三方法 + Scope + Emit / Logger），组件嵌入后只需覆盖关心的阶段——核心接口保持最小，复杂度按需覆盖。
 - 运行期支持动态启用 / 禁用 / 替换实例。
 
@@ -135,9 +136,11 @@ Application Root
 
 | 阶段 | 时机 | 职责 |
 |---|---|---|
-| Build | 全树实例化后统一调用（先父后子） | 解码 config、Get / Provide 服务、订阅子节点事件、接线 |
-| Run | 全树 Build 全部成功后 | 启动服务（先接线后点火） |
+| Build | 激活节点后、Run 前（先父后子） | 解码 config、Get 依赖服务（可能触发惰性激活）、订阅子节点事件、接线 |
+| Run | Build 成功后（先父后子） | 启动服务（先接线后点火） |
 | Stop | Shutdown 时按 Run 逆序（子先父后） | 优雅关闭（关 server / db / flush） |
+
+**惰性与按需激活**：配置树节点可用 `lazy: true` 声明延迟加载；注册为 service 的组件（`AsService[T]`）默认惰性。登记阶段只校验与建索引，不实例化；惰性节点在首次 `Get[T]()`（service）或 `Kernel.Activate(id)` 时被激活。装配期激活保持"先全树 Build 再全树 Run"；惰性路径是"实例化 + Build + Run 一体"，依赖 DAG 由 Build 期的 Get 推导（父组件 Build 时 Get 懒服务 → 先激活服务再继续），天然"先依赖后依赖方"，同时消除了对配置树声明顺序的依赖。激活由内核互斥保证单例幂等。
 
 **配置树设计（YAML · 两段式解析）**：
 
@@ -182,7 +185,7 @@ children:
 - **多实例机制**：配置树里声明多个同 type 节点即可（id 唯一，缺省 id = type）；init() 注册的类型工厂每次调用返回**新实例**，各实例的 config / 事件 / 生命周期完全独立。
 - 实例配置 = 父链默认值 + 父节点覆盖 + 实例自身声明。
 - 例：用户体系在 Web 下表现为会话登录，在小程序下表现为 openid 登录；日志在 API 下输出 JSON、在 TUI 下输出 ANSI 彩色——组件本身不改，读父链下发的配置 / 角色决定行为。
-- **服务提供的约定**：服务查找是全局的（按 Go 类型唯一）。`Provide` 只在 **Build 期**调用（装配是单线程，运行期不要 Provide，避免 map 并发写）；多实例场景通常只由**主实例** Provide 服务；重复 Provide 同类型会覆盖并告警。
+- **服务提供的约定**：服务查找是全局的（按 Go 类型唯一）。组件可选实现 `ServiceProvider.Provide() any`，Build 成功后内核把返回值按 Go 类型登记，供 `Get[T]()` 查找；重复提供同类型会覆盖并告警。**service 组件**用注册选项声明：`loong.RegisterComponent(name, factory, loong.AsService[T]())` 表示"本类型提供 T 服务且惰性激活"——首次 `Get[T]()`（或 `Activate`）才实例化 + Build + Run，适合重活组件（开库 / 连网）；启动即需的渠道组件（如 web）不标 `AsService`，Build 时照常提供能力（Router 等），激活即对查找可见。service 组件在配置树中**同 type 只能挂一个实例**（查找全局唯一，装配时检查）。查找失败 / 惰性激活失败用 `TryGet[T]() (T, error)` 报告，`Get[T]()` 保持零值语义；`Activate(id)` 可手动激活任意 lazy 节点。
 - **装配失败清理**：Build / Run 阶段任一组件失败，已 Build 的组件会按逆序 Stop（释放 db / server 等资源），`Shutdown` 在未装配或装配失败后调用均为安全空操作。
 - **约束**：组件的可变部分必须走配置 / 接口，不能写死全局状态。
 

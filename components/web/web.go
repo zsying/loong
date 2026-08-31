@@ -14,8 +14,8 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
-	"github.com/zsying/loong/components/user"
 	"github.com/zsying/loong"
+	"github.com/zsying/loong/components/user"
 )
 
 // Config is the component's own config block, decoded by the component.
@@ -45,18 +45,17 @@ type Web struct {
 	users *user.Service
 }
 
-func (w *Web) Build(ctx *loong.Scope) error {
+func (w *Web) Build(scope *loong.Scope) error {
 	var cfg Config
-	if err := ctx.Config.Decode(&cfg); err != nil {
+	if err := scope.Config.Decode(&cfg); err != nil {
 		return err
 	}
 	w.cfg = cfg
 	w.mux = http.NewServeMux()
-	ctx.Kernel.Provide(&Router{mux: w.mux})
-	w.users = ctx.Kernel.Get[*user.Service]()
+	w.users = scope.Kernel.Get[*user.Service]()
 
 	// Demo subscription: react to events emitted by business children.
-	ctx.On("biz.greet.hello", func(e loong.Event) error {
+	scope.On("biz.greet.hello", func(e loong.Event) error {
 		slog.Info("event received", "name", e.Name, "source", e.Source, "payload", e.Payload)
 		return nil
 	})
@@ -70,7 +69,12 @@ func (w *Web) Build(ctx *loong.Scope) error {
 	return nil
 }
 
-func (w *Web) Run(ctx *loong.Scope) error {
+// Provide exposes the channel's Router capability to other components.
+// The web node is not lazy (it is a startup channel), so the Router
+// becomes visible to lookups as soon as the web component is built.
+func (w *Web) Provide() any { return &Router{mux: w.mux} }
+
+func (w *Web) Run(scope *loong.Scope) error {
 	slog.Info("web listening", "addr", w.cfg.Listen)
 	w.srv = &http.Server{Addr: w.cfg.Listen, Handler: w.mux}
 	go func() {

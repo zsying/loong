@@ -3,22 +3,33 @@ package loong
 import (
 	"os"
 	"regexp"
+	"sync"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Node is one component instance in the config tree. The kernel only
-// reads the skeleton (type/id/children); Config stays opaque and is
-// decoded by the component itself (schema-per-component).
+// reads the skeleton (type/id/lazy/children); Config stays opaque and
+// is decoded by the component itself (schema-per-component).
+//
+// Lazy nodes are registered during assembly but not activated: they
+// are instantiated on demand through Get[T]() (service components) or
+// Kernel.Activate. The act* fields guard that on-demand activation
+// against concurrent callers.
 type Node struct {
 	Type     string    `yaml:"type"`
 	ID       string    `yaml:"id,omitempty"`
+	Lazy     bool      `yaml:"lazy,omitempty"`
 	Config   yaml.Node `yaml:"config"`
 	Children []*Node   `yaml:"children"`
 
 	parent    *Node
 	component Component
 	handlers  map[string]Handler
+
+	actMu   sync.Mutex
+	actDone bool
+	actErr  error
 }
 
 // envRe matches ${ENV_VAR} placeholders expanded from the environment.

@@ -5,55 +5,64 @@ import (
 	"fmt"
 	"log/slog"
 	"reflect"
+	"sync"
 )
 
 // Kernel assembles and runs the component tree in a single process.
 type Kernel struct {
-	factories map[string]func() Component
-	services  map[reflect.Type]any
-	root      *Node
+	factories   map[string]regEntry
+	services    map[reflect.Type]any
+	serviceIdx  map[reflect.Type]string // service value type -> component type name
+	nodesByType map[string][]*Node      // component type name -> registered nodes
+	idIndex     map[string]*Node        // node id -> node
+	root        *Node
+	mu          sync.Mutex // guards services; activation happens outside it
 }
 
 // New returns a kernel seeded with all init()-registered factories.
 func New() *Kernel {
-	f := make(map[string]func() Component, len(factories))
-	for name, fn := range factories {
-		f[name] = fn
+	f := make(map[string]regEntry, len(factories))
+	idx := make(map[reflect.Type]string)
+	for name, e := range factories {
+		f[name] = e
+		if e.service {
+			idx[e.serviceType] = name
+		}
 	}
-	return &Kernel{factories: f, services: make(map[reflect.Type]any)}
+	return &Kernel{
+		factories:   f,
+		services:    make(map[reflect.Type]any),
+		serviceIdx:  idx,
+		nodesByType: make(map[string][]*Node),
+		idIndex:     make(map[string]*Node),
+	}
 }
 
-// Provide registers a service instance, keyed by its Go type.
-// Re-registering the same type (e.g. when a component type is mounted
-// multiple times) overwrites the previous value with a warning; the
-// convention is that only one instance of a type provides services.
-func (k *Kernel) Provide(service any) *Kernel {
-	t := reflect.TypeOf(service)
-	if _, exists := k.services[t]; exists {
-		slog.Warn("loong: service type already provided, overwriting", "type", t.String())
-	}
-	k.services[t] = service
-	return k
-}
-
-// Assemble instantiates the tree from a loaded config root and runs
-// the three phases over the whole tree in order: Build, Run. Build is
-// intentionally first so every component is wired (config decoded,
-// dependencies resolved, event handlers subscribed) before any of them
-// starts serving (wire first, fire later). If Build or Run fails,
-// components already built are stopped in reverse order so acquired
-// resources (db connections, servers) are released.
+// Assemble registers the tree and activates every non-lazy node in two
+// phases: Build (instantiate + wire, parent before child) then Run
+// (start serving, parent before child). Lazy nodes — service components
+// declared via AsService[T], or any node marked lazy in the config
+// tree — are registered only and activated on demand through Get[T]()
+// or Activate. If Build or Run fails, nodes already built are stopped
+// in reverse order so acquired resources (db connections, servers) are
+// released.
 func (k *Kernel) Assemble(root *Node) error {
 	k.root = root
-	if err := k.instantiate(root, nil); err != nil {
+	if err := k.register(root, nil); err != nil {
 		return err
 	}
 	if err := k.checkUniqueIDs(root); err != nil {
 		return err
 	}
+	if err := k.checkServiceUniqueness(); err != nil {
+		return err
+	}
 	var built []*Node
 	if err := k.walk(root, func(n *Node) error {
-		if err := n.component.Build(&Scope{Kernel: k, Node: n, Config: n.Config}); err != nil {
+		if n.Lazy || k.factories[n.Type].service {
+			return nil
+		}
+		if err := k.buildNode(n); err != nil {
 			return errors.Join(fmt.Errorf("loong: build %q: %w", n.ID, err), k.stopReverse(built))
 		}
 		built = append(built, n)
@@ -62,6 +71,9 @@ func (k *Kernel) Assemble(root *Node) error {
 		return err
 	}
 	return k.walk(root, func(n *Node) error {
+		if n.Lazy || k.factories[n.Type].service {
+			return nil
+		}
 		if err := n.component.Run(&Scope{Kernel: k, Node: n}); err != nil {
 			return errors.Join(fmt.Errorf("loong: run %q: %w", n.ID, err), k.stopReverse(built))
 		}
@@ -69,22 +81,114 @@ func (k *Kernel) Assemble(root *Node) error {
 	})
 }
 
-func (k *Kernel) instantiate(n *Node, parent *Node) error {
+// register walks the tree, filling default ids, setting parent
+// pointers, validating component types and building the by-type /
+// by-id indexes. Nothing is instantiated here — this phase is cheap
+// and always runs fully.
+func (k *Kernel) register(n *Node, parent *Node) error {
 	n.parent = parent
 	if n.ID == "" {
 		n.ID = n.Type
 	}
-	f, ok := k.factories[n.Type]
-	if !ok {
+	if _, ok := k.factories[n.Type]; !ok {
 		return fmt.Errorf("loong: unknown component type %q (node %q)", n.Type, n.ID)
 	}
-	n.component = f()
+	k.nodesByType[n.Type] = append(k.nodesByType[n.Type], n)
+	k.idIndex[n.ID] = n
 	for _, c := range n.Children {
-		if err := k.instantiate(c, n); err != nil {
+		if err := k.register(c, n); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// checkServiceUniqueness enforces that a service component type is
+// mounted exactly once, since service lookup is global per Go type and
+// a duplicate would make Get[T]() ambiguous.
+func (k *Kernel) checkServiceUniqueness() error {
+	for typeName, nodes := range k.nodesByType {
+		if k.factories[typeName].service && len(nodes) > 1 {
+			return fmt.Errorf("loong: service type %q mounted %d times, want exactly one node", typeName, len(nodes))
+		}
+	}
+	return nil
+}
+
+// buildNode instantiates one node and runs its Build phase, then
+// registers any service it provides (ServiceProvider) under its value
+// type. Run is deliberately kept separate so assembly can wire the
+// whole tree before anything starts serving.
+func (k *Kernel) buildNode(n *Node) error {
+	n.component = k.factories[n.Type].factory()
+	sc := &Scope{Kernel: k, Node: n, Config: n.Config}
+	if err := n.component.Build(sc); err != nil {
+		return err
+	}
+	k.registerService(n)
+	return nil
+}
+
+// registerService stores the value returned by a node's Provide() in
+// the global service table, keyed by its Go type. Only components that
+// implement ServiceProvider are registered; re-registering the same
+// type overwrites the previous value with a warning.
+func (k *Kernel) registerService(n *Node) {
+	sp, ok := n.component.(ServiceProvider)
+	if !ok {
+		return
+	}
+	svc := sp.Provide()
+	if svc == nil {
+		return
+	}
+	t := reflect.TypeOf(svc)
+	k.mu.Lock()
+	if _, exists := k.services[t]; exists {
+		slog.Warn("loong: service type already provided, overwriting", "type", t.String())
+	}
+	k.services[t] = svc
+	k.mu.Unlock()
+}
+
+// ensureActive activates a lazy node exactly once, running the full
+// lifecycle (Build + Run) outside any kernel-wide lock so component
+// code may itself call Get/TryGet for other lazy services without
+// deadlocking. The per-node mutex serializes concurrent activations of
+// the same node and caches the outcome for later callers.
+func (k *Kernel) ensureActive(n *Node) error {
+	n.actMu.Lock()
+	defer n.actMu.Unlock()
+	if n.actDone {
+		return n.actErr
+	}
+	n.component = k.factories[n.Type].factory()
+	sc := &Scope{Kernel: k, Node: n, Config: n.Config}
+	if err := n.component.Build(sc); err != nil {
+		n.actDone, n.actErr = true, err
+		return err
+	}
+	k.registerService(n)
+	if err := n.component.Run(sc); err != nil {
+		n.actDone, n.actErr = true, err
+		return err
+	}
+	n.actDone = true
+	return nil
+}
+
+// Activate manually activates a lazy node at runtime — useful for a
+// component declared lazy in the config tree that is needed on demand
+// but does not provide a service. It is idempotent: activating an
+// already active node is a no-op returning its cached outcome.
+func (k *Kernel) Activate(id string) error {
+	k.mu.Lock()
+	n := k.idIndex[id]
+	k.mu.Unlock()
+	if n == nil {
+		return fmt.Errorf("loong: unknown node %q", id)
+	}
+	return k.ensureActive(n)
 }
 
 func (k *Kernel) checkUniqueIDs(root *Node) error {
@@ -111,7 +215,8 @@ func (k *Kernel) walk(n *Node, fn func(*Node) error) error {
 }
 
 // Shutdown stops the tree in reverse Run order (children before
-// parents) so dependents stop before their dependencies. All Stop
+// parents) so dependents stop before their dependencies. Lazy nodes
+// that were never activated have no instance and are skipped. All Stop
 // calls are attempted; errors are aggregated. Safe to call before
 // Assemble (no-op) or after a failed assembly (stops built nodes).
 func (k *Kernel) Shutdown() error {
@@ -127,11 +232,15 @@ func (k *Kernel) Shutdown() error {
 }
 
 // stopReverse calls Stop on the given nodes in reverse order and
-// aggregates all errors.
+// aggregates all errors. Nodes without an instance (never activated)
+// are skipped.
 func (k *Kernel) stopReverse(nodes []*Node) error {
 	var errs []error
 	for i := len(nodes) - 1; i >= 0; i-- {
 		n := nodes[i]
+		if n.component == nil {
+			continue
+		}
 		if err := n.component.Stop(&Scope{Kernel: k, Node: n}); err != nil {
 			errs = append(errs, fmt.Errorf("loong: stop %q: %w", n.ID, err))
 		}

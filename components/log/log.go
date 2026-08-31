@@ -24,9 +24,9 @@ type Log struct {
 	loong.Base
 }
 
-func (l *Log) Build(ctx *loong.Scope) error {
+func (l *Log) Build(scope *loong.Scope) error {
 	var cfg Config
-	if err := ctx.Config.Decode(&cfg); err != nil {
+	if err := scope.Config.Decode(&cfg); err != nil {
 		return err
 	}
 	level := slog.LevelInfo
