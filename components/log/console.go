@@ -35,7 +35,7 @@ type consoleHandler struct {
 	mu     *sync.Mutex
 	level  slog.Leveler
 	color  bool
-	groups []string   // WithGroup path
+	groups []string    // WithGroup path
 	fixed  []slog.Attr // attrs pinned via WithAttrs
 }
 

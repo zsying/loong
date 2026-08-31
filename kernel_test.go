@@ -2,6 +2,8 @@ package loong
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -375,6 +377,52 @@ func TestServiceTypeMismatch(t *testing.T) {
 	// Repeated lookups report the cached failure, not re-activate.
 	if _, err := k.TryGet[*svcAlpha](); err == nil {
 		t.Fatal("expected cached activation error on second lookup")
+	}
+}
+
+// TestLoadTreeLazyYAML verifies the full yaml -> register -> activate
+// path for a `lazy: true` node: it parses, stays inactive after
+// assembly, and comes alive via Activate.
+func TestLoadTreeLazyYAML(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "loong.yaml")
+	content := `type: test.spy
+id: root
+children:
+  - type: test.spy
+    id: eager
+  - type: test.spy
+    id: opt
+    lazy: true
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	root, err := LoadTree(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !root.Children[1].Lazy {
+		t.Fatal("lazy: true was not parsed from yaml")
+	}
+
+	var r recorder
+	RegisterComponent("test.spy", func() Component { return &spy{r: &r} })
+	k := New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	if n := k.idIndex["opt"]; n.component != nil {
+		t.Fatal("lazy node should stay inactive after assembly")
+	}
+	if err := k.Activate("opt"); err != nil {
+		t.Fatal(err)
+	}
+	if n := k.idIndex["opt"]; n.component == nil {
+		t.Fatal("lazy node should be activated by Activate")
+	}
+	if err := k.Shutdown(); err != nil {
+		t.Fatal(err)
 	}
 }
 
