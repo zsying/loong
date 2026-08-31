@@ -1,6 +1,7 @@
 package loong
 
 import (
+	"bytes"
 	"fmt"
 
 	"gopkg.in/yaml.v3"
@@ -19,12 +20,12 @@ type Component interface {
 
 // Scope carries the node and its raw config block during Build/Run.
 // Named Scope (not Context) to avoid clashing with the standard
-// library context.Context. Config is opaque to the kernel; the
-// component decodes it into its own struct (schema-per-component).
+// library context.Context. Raw is the opaque config node; components
+// decode it into their own struct via Config[T] (schema-per-component).
 type Scope struct {
 	Kernel *Kernel
 	Node   *Node
-	Config yaml.Node
+	Raw    yaml.Node
 }
 
 // Emit sends an event upward to the direct parent node.
@@ -60,4 +61,26 @@ func (s *Scope) OnTyped[T any](name string, h func(T) error) {
 		}
 		return h(p)
 	})
+}
+
+// Config decodes the node's config block into T and returns it. An
+// absent config block yields the zero value. Decoding is strict: keys
+// not present in T's yaml tags fail with an error naming the unknown
+// field, so typos in the config tree surface at activation instead of
+// being silently ignored. Errors carry the node id for context.
+func (s *Scope) Config[T any]() (T, error) {
+	var cfg T
+	if s.Raw.IsZero() {
+		return cfg, nil
+	}
+	data, err := yaml.Marshal(&s.Raw)
+	if err != nil {
+		return cfg, fmt.Errorf("loong: re-encode config for node %q: %w", s.Node.ID, err)
+	}
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil {
+		return cfg, fmt.Errorf("loong: decode config for node %q: %w", s.Node.ID, err)
+	}
+	return cfg, nil
 }

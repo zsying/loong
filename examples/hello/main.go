@@ -35,8 +35,8 @@ type greet struct {
 }
 
 func (g *greet) Build(ctx *loong.Scope) error {
-	var cfg greetConfig
-	if err := ctx.Config.Decode(&cfg); err != nil {
+	cfg, err := ctx.Config[greetConfig]()
+	if err != nil {
 		return err
 	}
 	g.Base.Build(ctx)
@@ -53,6 +53,7 @@ func (g *greet) Build(ctx *loong.Scope) error {
 func init() {
 	loong.RegisterComponent("app", func() loong.Component { return &app{} })
 	loong.RegisterComponent("biz.greet", func() loong.Component { return &greet{} },
+		loong.WithConfig[greetConfig](),
 		loong.WithEvents("biz.greet.hello"),
 		loong.WithDesc("sample business component mounted under a web channel"),
 	)

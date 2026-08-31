@@ -3,6 +3,7 @@ package loong
 import (
 	"log/slog"
 	"reflect"
+	"strings"
 )
 
 // serviceDecl pairs a declared service type with the accessor that
@@ -16,11 +17,12 @@ type serviceDecl struct {
 // optional registration semantics (services, activation mode, events,
 // description).
 type regEntry struct {
-	factory  func() Component
-	services []serviceDecl // services declared via WithService (may be several)
-	eager    bool          // activated at assembly instead of lazily (Eager)
-	emits    []string      // event names this component emits (WithEvents)
-	desc     string        // human description for the component catalog (WithDesc)
+	factory    func() Component
+	services   []serviceDecl // services declared via WithService (may be several)
+	configType reflect.Type  // config struct declared via WithConfig
+	eager      bool          // activated at assembly instead of lazily (Eager)
+	emits      []string      // event names this component emits (WithEvents)
+	desc       string        // human description for the component catalog (WithDesc)
 }
 
 // factories holds component type factories registered via init().
@@ -65,6 +67,17 @@ func Eager() ComponentOption {
 	return func(e *regEntry) { e.eager = true }
 }
 
+// WithConfig declares the config struct this component type accepts.
+// The type is reflected into field metadata surfaced by Components(),
+// so consumers can see which keys a config block may contain before
+// writing the yaml. It does not change decoding behavior — components
+// still decode their own config (see Scope.Config).
+func WithConfig[T any]() ComponentOption {
+	return func(e *regEntry) {
+		e.configType = reflect.TypeOf((*T)(nil)).Elem()
+	}
+}
+
 // WithEvents declares the event names this component emits. Names may
 // end in ".*" to denote a domain prefix (e.g. "user.*"). The list is
 // surfaced by Components() for discoverability.
@@ -101,27 +114,75 @@ func RegisterComponent(typeName string, factory func() Component, opts ...Compon
 // ComponentMeta is the discoverable metadata of one registered
 // component type, returned by Components().
 type ComponentMeta struct {
-	Type    string   // type name used in the config tree
-	Desc    string   // WithDesc description
-	Service bool     // exposes at least one service
-	Eager   bool     // activated at assembly (service components are lazy by default)
-	Emits   []string // event names declared via WithEvents
+	Type         string        // type name used in the config tree
+	Desc         string        // WithDesc description
+	Service      bool          // exposes at least one service
+	Eager        bool          // activated at assembly (service components are lazy by default)
+	Emits        []string      // event names declared via WithEvents
+	ConfigType   string        // declared config struct name (WithConfig)
+	ConfigFields []ConfigField // config keys with types and optionality
+}
+
+// ConfigField describes one key of a component's config block.
+type ConfigField struct {
+	Name     string // yaml key as written in the config tree
+	Type     string // Go type name
+	Optional bool   // yaml tag carries omitempty
 }
 
 // Components returns metadata for every init()-registered component
 // type. It is the discovery entry point for using loong at scale:
-// pick a type name for the config tree, then go doc the exported
-// service types for their interfaces.
+// pick a type name for the config tree, inspect its config keys, then
+// go doc the exported service types for their interfaces.
 func Components() []ComponentMeta {
 	out := make([]ComponentMeta, 0, len(factories))
 	for name, e := range factories {
+		cfgType, cfgFields := describeConfig(e.configType)
 		out = append(out, ComponentMeta{
-			Type:    name,
-			Desc:    e.desc,
-			Service: len(e.services) > 0,
-			Eager:   e.eager,
-			Emits:   e.emits,
+			Type:         name,
+			Desc:         e.desc,
+			Service:      len(e.services) > 0,
+			Eager:        e.eager,
+			Emits:        e.emits,
+			ConfigType:   cfgType,
+			ConfigFields: cfgFields,
 		})
 	}
 	return out
+}
+
+// describeConfig reflects a config struct type into field metadata.
+// Nil or non-struct types yield empty output (component takes no
+// declared config).
+func describeConfig(typ reflect.Type) (string, []ConfigField) {
+	if typ == nil || typ.Kind() == reflect.Ptr && typ.Elem().Kind() != reflect.Struct {
+		return "", nil
+	}
+	if typ.Kind() == reflect.Ptr {
+		typ = typ.Elem()
+	}
+	if typ.Kind() != reflect.Struct {
+		return "", nil
+	}
+	fields := make([]ConfigField, 0, typ.NumField())
+	for i := 0; i < typ.NumField(); i++ {
+		f := typ.Field(i)
+		if f.PkgPath != "" { // unexported
+			continue
+		}
+		tag := f.Tag.Get("yaml")
+		if tag == "-" {
+			continue
+		}
+		name, opts, _ := strings.Cut(tag, ",")
+		if name == "" {
+			name = strings.ToLower(f.Name)
+		}
+		fields = append(fields, ConfigField{
+			Name:     name,
+			Type:     f.Type.String(),
+			Optional: strings.Contains(opts, "omitempty"),
+		})
+	}
+	return typ.String(), fields
 }

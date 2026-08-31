@@ -5,8 +5,11 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 // recorder collects lifecycle call order for assertions.
@@ -622,10 +625,17 @@ type catProv struct {
 
 func (c *catProv) Build(*Scope) error { return nil }
 
+type catConfig struct {
+	Mode string `yaml:"mode"`
+	Size int    `yaml:"size,omitempty"`
+}
+
 // TestComponentsCatalog verifies the discovery metadata exposes type
-// names, service flags, eager mode, events and descriptions.
+// names, service flags, eager mode, events, descriptions and config
+// keys.
 func TestComponentsCatalog(t *testing.T) {
 	RegisterComponent("test.cat", func() Component { return &catProv{} },
+		WithConfig[catConfig](),
 		WithService(func(c Component) *catSvc { return &catSvc{} }),
 		WithEvents("test.one", "test.*"),
 		WithDesc("a catalog entry"))
@@ -648,5 +658,58 @@ func TestComponentsCatalog(t *testing.T) {
 	}
 	if found.Desc != "a catalog entry" {
 		t.Errorf("desc = %q", found.Desc)
+	}
+	if found.ConfigType != "loong.catConfig" {
+		t.Errorf("config type = %q, want loong.catConfig", found.ConfigType)
+	}
+	wantFields := []ConfigField{
+		{Name: "mode", Type: "string", Optional: false},
+		{Name: "size", Type: "int", Optional: true},
+	}
+	if !reflect.DeepEqual(found.ConfigFields, wantFields) {
+		t.Errorf("config fields = %+v, want %+v", found.ConfigFields, wantFields)
+	}
+}
+
+// testCfg drives TestScopeConfig: decoding, strict unknown-field
+// checking, and the empty-config zero value.
+type testCfg struct {
+	Name string `yaml:"name"`
+	Port int    `yaml:"port,omitempty"`
+}
+
+func parseConfig(t *testing.T, yamlText string) yaml.Node {
+	t.Helper()
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(yamlText), &doc); err != nil {
+		t.Fatal(err)
+	}
+	// doc is a DocumentNode; the mapping lives in Content[0], the same
+	// shape LoadTree stores into Node.Config.
+	return *doc.Content[0]
+}
+
+func TestScopeConfig(t *testing.T) {
+	// Decoding a well-formed block.
+	s := &Scope{Kernel: New(), Node: &Node{ID: "x"}, Raw: parseConfig(t, "name: hello\nport: 8080\n")}
+	cfg, err := s.Config[testCfg]()
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if cfg.Name != "hello" || cfg.Port != 8080 {
+		t.Fatalf("cfg = %+v, want name=hello port=8080", cfg)
+	}
+
+	// Unknown fields are rejected (strict mode).
+	bad := &Scope{Kernel: New(), Node: &Node{ID: "y"}, Raw: parseConfig(t, "name: hi\ntypo_field: 1\n")}
+	if _, err := bad.Config[testCfg](); err == nil || !strings.Contains(err.Error(), "typo_field") {
+		t.Fatalf("expected unknown-field error mentioning typo_field, got %v", err)
+	}
+
+	// An absent config block yields the zero value.
+	empty := &Scope{Kernel: New(), Node: &Node{ID: "z"}}
+	z, err := empty.Config[testCfg]()
+	if err != nil || z != (testCfg{}) {
+		t.Fatalf("empty config = %+v, err %v, want zero value", z, err)
 	}
 }

@@ -114,7 +114,7 @@ func (k *Kernel) register(n *Node, parent *Node) error {
 // starts serving.
 func (k *Kernel) buildNode(n *Node) error {
 	n.component = k.factories[n.Type].factory()
-	sc := &Scope{Kernel: k, Node: n, Config: n.Config}
+	sc := &Scope{Kernel: k, Node: n, Raw: n.Config}
 	if err := n.component.Build(sc); err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func (k *Kernel) ensureActive(n *Node) error {
 		return n.actErr
 	}
 	n.component = k.factories[n.Type].factory()
-	sc := &Scope{Kernel: k, Node: n, Config: n.Config}
+	sc := &Scope{Kernel: k, Node: n, Raw: n.Config}
 	if err := n.component.Build(sc); err != nil {
 		n.actDone, n.actErr = true, err
 		return err

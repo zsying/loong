@@ -25,8 +25,8 @@ type Log struct {
 }
 
 func (l *Log) Build(scope *loong.Scope) error {
-	var cfg Config
-	if err := scope.Config.Decode(&cfg); err != nil {
+	cfg, err := scope.Config[Config]()
+	if err != nil {
 		return err
 	}
 	level := slog.LevelInfo
@@ -57,6 +57,7 @@ func (l *Log) Build(scope *loong.Scope) error {
 
 func init() {
 	loong.RegisterComponent("log", func() loong.Component { return &Log{} },
+		loong.WithConfig[Config](),
 		loong.WithDesc("process-wide logging via slog, console/json formats"),
 	)
 }

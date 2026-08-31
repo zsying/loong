@@ -50,6 +50,7 @@
 | 内核 | 独立实现，思想继承 owl（build/run/stop 三阶段、init() 自注册、type-based 服务 key）；提供 Base 骨架组件 |
 | 部署形态 | 单进程单体 |
 | 配置树 | YAML，两段式解析（schema-per-component），支持 `${ENV}` 展开 |
+| 组件 config | `WithConfig[T]` 声明结构（`Components()` 展示字段）；`scope.Config[T]()` 严格解码（未知字段报错） |
 | 事件协议 | `{Name, Source, Payload}`，直达直接父节点，`On(name, handler)` 订阅 |
 | 服务查找 | `Scope.Get[T]()` 树优先级（唯一提供者或父链最近；歧义提示 `GetFrom[T](id)`），Go 类型即 key |
 | 服务组件 | 注册选项 `WithService[T](get)`（可多个）+ `Eager()`；默认惰性、多实例并存 |
@@ -146,7 +147,7 @@ Application Root
 
 - 节点 schema 统一：`{type, id?, config?, children?}`，平台只解析这 4 个字段；`config` 是不透明字节（yaml.Node），原样传给对应组件，不再深入。
 - **根节点就是配置树的第一个节点**（无需 `root:` 包装键）。
-- **组件自描述（schema-per-component）**：组件注册自己的配置 struct（如 `WebConfig`），装配器实例化时把 config 块 decode 进去；decode 失败报错带节点路径（如 `components[2].config`）。
+- **组件自描述（schema-per-component）**：组件注册自己的配置 struct（`WithConfig[T]`，元数据进 `Components()`：字段名 / 类型 / 可选性），Build 里用 `scope.Config[T]()` 解码——**严格模式**：未知字段报错并带节点 id（typo 在激活期暴露而非静默忽略）；无 config 块返回零值。使用者在写 yaml 前即可通过 `Components()` 查看组件接受哪些 key。
 - 平台永远不需要知道完整 schema → 新增组件只需注册自己的 struct，配置结构随组件自由变化，无需改平台。
 - 继承与覆盖优先级：实例 config（配置树声明）> 父组件 build 期增强（下行 props）> 组件默认值。
 - 环境差异（dev / prod）：v0.1 用 `${ENV}` 环境变量覆盖，不做多层配置合并。注意展开是**文本级**（YAML 解析前替换），值含 YAML 敏感字符（`:` `#` 引号）时需在配置里加引号。

@@ -78,9 +78,9 @@ type greet struct {
 }
 
 func (g *greet) Build(ctx *loong.Scope) error {
-    // 1. decode your own config block (schema-per-component)
-    var cfg greetConfig
-    if err := ctx.Config.Decode(&cfg); err != nil {
+    // 1. decode your own config block (strict: unknown keys fail)
+    cfg, err := ctx.Config[greetConfig]()
+    if err != nil {
         return err
     }
     // 2. wire dependencies / register routes through parent services
@@ -94,7 +94,11 @@ func (g *greet) Build(ctx *loong.Scope) error {
 }
 
 func init() {
-    loong.RegisterComponent("biz.greet", func() loong.Component { return &greet{} })
+    loong.RegisterComponent("biz.greet", func() loong.Component { return &greet{} },
+        loong.WithConfig[greetConfig](), // declare your config struct (shown by Components())
+        loong.WithEvents("biz.greet.hello"),
+        loong.WithDesc("sample business component"),
+    )
 }
 ```
 

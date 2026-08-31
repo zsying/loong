@@ -167,8 +167,8 @@ type Component struct {
 }
 
 func (c *Component) Build(scope *loong.Scope) error {
-	var cfg Config
-	if err := scope.Config.Decode(&cfg); err != nil {
+	cfg, err := scope.Config[Config]()
+	if err != nil {
 		return err
 	}
 	if cfg.DBPath == "" {
@@ -192,6 +192,7 @@ func (c *Component) Stop(*loong.Scope) error {
 
 func init() {
 	loong.RegisterComponent("user", func() loong.Component { return &Component{} },
+		loong.WithConfig[Config](),
 		loong.WithService(func(c loong.Component) *Service { return c.(*Component).Service }),
 		loong.WithDesc("user system: accounts, password auth, openid login"),
 	)
