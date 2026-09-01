@@ -68,15 +68,23 @@ Press `Ctrl+C` to shut down gracefully (components are stopped in reverse Run or
 
 ## CLI
 
-CLI applications are built on the platform itself, using the **parent-defined activation** primitive (`scope.Activate(child, args)` — a parent activates one of its direct children and arguments flow through `scope.Args`). `components/cli` provides a **cli master** (parses the command line and activates the matching child command), a generic `cli.group` container for multi-level commands, and built-in subcommands (`cli.list` / `cli.new` / `cli.tree`). Any loong application mounts them in its config tree; `examples/cli` is the working template (master + platform components + custom business commands, multi-level included).
+CLI applications are built on the platform itself, using the **parent-defined activation** primitive (`scope.Activate(child, args)` — a parent activates one of its direct children and arguments flow through `scope.Args`). The `components/cli` package provides the core: a **cli master** (parses the command line and activates the matching child command), a generic `cli.group` container for multi-level commands, and argument helpers. The optional `components/cli/commands` package adds platform commands (`cli.list` / `cli.new` / `cli.tree`) — import it only if you want them. A CLI is a full loong app, so it also mounts the `log` component for logging. `examples/cli` is the working template (master + log + custom business commands + multi-level groups).
 
 ```bash
 go run ./examples/cli list                # component catalog of *this* app (platform + business)
 go run ./examples/cli list --html
 go run ./examples/cli new greet           # scaffold a component source file
 go run ./examples/cli tree loong.yaml     # project config tree annotated with services
-go run ./examples/cli greet john --loud   # a custom business command
+go run ./examples/cli greet john --loud   # a custom business command (logged)
 go run ./examples/cli config show theme   # multi-level command: group "config" + "show"
+```
+
+```go
+import (
+    "github.com/zsying/loong/components/cli"            // master + cli.group
+    _ "github.com/zsying/loong/components/cli/commands" // optional: list/new/tree
+    _ "github.com/zsying/loong/components/log"          // logging, like any loong app
+)
 ```
 
 A CLI is just a loong app — mount the components in a config tree (embedded via `go:embed`, or as a file with `loong.LoadAndRun`), and main only starts the app and maps errors to exit codes. Both entry styles are shown in `examples/cli`:

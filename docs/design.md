@@ -68,7 +68,7 @@
 ```
 loong/
 ├── *.go           # 内核（package loong，仓库根即平台核心）
-├── components/    # 平台组件：log / user / web / cli（wechat、tui 后续补）
+├── components/    # 平台组件：log / user / web / cli（cli/commands 为可选命令集）
 ├── examples/      # 示例项目（hello：Web 渠道；cli：CLI 组件化模板）
 └── docs/          # 设计文档
 ```
@@ -195,12 +195,12 @@ children:
 CLI 应用与常驻渠道共用同一心智：**父组件定义其子节点的激活方式**（`Scope.Activate`），激活链全程是框架能力，无外部分发代码。`components/cli` 提供：
 
 - **父定义子激活（框架原语）**：`Scope.Activate(id string, args any)` —— 父节点激活自己的直接子节点，参数经子节点的 `Scope.Args` 注入；激活保持按节点幂等（参数首次激活生效）。这是通用能力，不限于 CLI（向导流程、状态机、插件选择皆可用）。
-- **cli 总控**（type `cli`，Eager）：`Run` 解析 os.Args，第一个参数是命令名——`ctx.Activate(args[0], args[1:])` 激活对应子命令并把剩余参数传下去；无参数或未知命令返回 `ErrUsage`（退出码 2）。
-- **命令 = lazy 子组件**：`cli.list` / `cli.new` / `cli.tree` 及业务命令组件挂载在总控下，`Run` 里读 `ctx.Args` 执行；`cli` 包提供 `HasFlag` / `Flag` / `Positional` 参数解析辅助。
-- **多级命令 = 树层级**：命令组是通用 `cli.group` 容器（`config` 下挂 `show` / `set`），其 `Run` 就是"把第一个参数当子命令 `Activate` 下去，剩余参数传递"——组组件零定制，任何层级复用同一类型；组被直接调用（无子命令）返回 `ErrUsage`。
-- **退出码**：`ErrUsage` sentinel 标记用法错误（错误分类由 cli 包给出，映射到具体数字是应用级决策——examples/cli 用 2）。命令在装配期执行（总控 Run 触发），`main` 只负责启动 + 错误映射 + `Shutdown`。
+- **cli 核心（`components/cli`）**：总控 `cli`（type `cli`，Eager，Run 解析 os.Args 激活首段命令并传参，无参数/未知命令返回 `ErrUsage`）+ 通用组容器 `cli.group`（把第一参数当子命令 `Activate` 下去，零定制，多级命令即树层级）+ 参数辅助 `HasFlag` / `Flag` / `Positional`。**只引入核心即可开发 CLI**。
+- **平台命令（可选，`components/cli/commands`）**：`cli.list` / `cli.new` / `cli.tree` 独立子包，按需 `_ import`——不需要就不引入（yaml 里也不出现对应类型）。
+- **命令 = lazy 子组件**：业务命令挂载在总控下，`Run` 里读 `ctx.Args` 执行；CLI 是完整 loong 应用，同时挂载 `log` 组件获得日志（命令/错误经 slog 记录）。
+- **退出码**：`ErrUsage` sentinel 标记用法错误（错误分类由 cli 包给出，映射到具体数字是应用级决策——examples/cli 用 2，且**任何错误先记录再退出**）。命令在装配期执行（总控 Run 触发），`main` 只负责启动 + 错误映射 + `Shutdown`。
 - **入口 = 普通 loong 应用**：不提供启动封装（无 cli.Go）——配置树内联用 `Parse + New + Assemble`，文件用 `loong.LoadAndRun`，退出码映射由 main 决定；examples/cli 展示两种入口。
-- 任何 loong 应用挂载这些组件即可获得组件化 CLI；`examples/cli` 是完整模板（总控 + 平台组件 + 业务命令 + 多级命令）。扩展命令 = 注册组件类型 + yaml 加 lazy 节点。
+- 任何 loong 应用挂载这些组件即可获得组件化 CLI；`examples/cli` 是完整模板（总控 + log + 业务命令 + 多级命令 + 平台命令）。扩展命令 = 注册组件类型 + yaml 加 lazy 节点。
 
 ## 5. 渠道适配
 

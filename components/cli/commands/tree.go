@@ -1,4 +1,4 @@
-package cli
+package commands
 
 import (
 	"fmt"
@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/zsying/loong/components/cli"
 
 	"github.com/zsying/loong"
 )
@@ -19,7 +21,7 @@ type Tree struct {
 
 func (c *Tree) Run(ctx *loong.Scope) error {
 	args, _ := ctx.Args.([]string)
-	pos := Positional(args)
+	pos := cli.Positional(args)
 	if len(pos) == 0 {
 		return fmt.Errorf("cli tree: missing config path (usage: cli tree <config.yaml>)")
 	}
@@ -28,7 +30,7 @@ func (c *Tree) Run(ctx *loong.Scope) error {
 		return err
 	}
 	meta := catalogIndex()
-	if HasFlag(args, "html") {
+	if cli.HasFlag(args, "html") {
 		fmt.Print(renderTreeHTML(root, meta))
 	} else {
 		fmt.Print(renderTree(root, meta))

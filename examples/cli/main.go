@@ -1,12 +1,14 @@
 // Command cli demonstrates building a CLI as a loong component tree:
-// a cli master (importing components/cli) plus platform components and
-// custom business command components, all wired through a config tree.
-// The activation chain is pure framework — the master parses the
-// command line and activates the matching child via scope.Activate,
-// arguments flow down through scope.Args, and command groups
-// (cli.group) forward to their children. No dispatch code lives
-// outside the components; main only starts the app, maps errors to
-// exit codes, and shuts down (the command runs during assembly).
+// a cli master (components/cli) plus platform components (log, user,
+// web), the optional platform command set (components/cli/commands)
+// and custom business command components, all wired through a config
+// tree. The activation chain is pure framework — the master parses
+// the command line and activates the matching child via
+// scope.Activate, arguments flow down through scope.Args, and command
+// groups (cli.group) forward to their children. No dispatch code
+// lives outside the components; main only starts the app, maps errors
+// to exit codes, and shuts down (the command runs during assembly).
+// Logging comes from the mounted log component, like any loong app.
 //
 // Two entry styles are shown: an embedded config tree with the plain
 // standard API (default), and LoadAndRun for a file-based tree — the
@@ -16,12 +18,12 @@ package main
 import (
 	_ "embed"
 	"errors"
-	"fmt"
-	"log"
+	"log/slog"
 	"os"
 
 	"github.com/zsying/loong"
-	"github.com/zsying/loong/components/cli" // registers the cli master + subcommands
+	"github.com/zsying/loong/components/cli"            // registers the cli master + cli.group
+	_ "github.com/zsying/loong/components/cli/commands" // optional: platform commands list/new/tree
 	_ "github.com/zsying/loong/components/log"
 	_ "github.com/zsying/loong/components/user"
 	_ "github.com/zsying/loong/components/web"
@@ -59,13 +61,13 @@ func main() {
 
 // exitCode maps an error to a process exit code — an application-level
 // choice: usage errors (cli.ErrUsage) are 2, everything else is 1.
-// Every error is printed before exiting — usage errors must never
+// Every error is logged before exiting — usage errors must never
 // exit silently.
 func exitCode(err error) int {
 	if errors.Is(err, cli.ErrUsage) {
-		fmt.Fprintln(os.Stderr, err) // e.g. "cli config" without a subcommand
+		slog.Error("usage", "err", err) // e.g. "cli config" without a subcommand
 		return 2
 	}
-	log.Print(err)
+	slog.Error("command failed", "err", err)
 	return 1
 }

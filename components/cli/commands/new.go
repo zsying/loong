@@ -1,4 +1,4 @@
-package cli
+package commands
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 	"text/template"
 
 	"github.com/zsying/loong"
+	"github.com/zsying/loong/components/cli"
 )
 
 // New implements the `new` subcommand: it scaffolds a component
@@ -18,13 +19,13 @@ type New struct {
 
 func (c *New) Run(ctx *loong.Scope) error {
 	args, _ := ctx.Args.([]string)
-	pos := Positional(args)
+	pos := cli.Positional(args)
 	if len(pos) == 0 {
 		return fmt.Errorf("cli new: missing component name (usage: cli new <name>)")
 	}
 	name := pos[0]
 	outDir := "."
-	if d, ok := Flag(args, "o"); ok {
+	if d, ok := cli.Flag(args, "o"); ok {
 		outDir = d
 	}
 	src, err := scaffoldComponent(name)
@@ -51,6 +52,7 @@ const scaffoldTemplate = `package main
 
 import (
 	"github.com/zsying/loong"
+	"github.com/zsying/loong/components/cli"
 )
 
 // {{.Name}}Config is the config block decoded from the config tree.

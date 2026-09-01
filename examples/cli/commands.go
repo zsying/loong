@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 
 	"github.com/zsying/loong"
 	"github.com/zsying/loong/components/cli"
@@ -9,8 +10,9 @@ import (
 
 // Greet is a business command component. It reads its arguments from
 // scope.Args — injected by the cli master via scope.Activate — and
-// prints a greeting. This is how a project's own command components
-// plug into the tree: no dispatch or argument plumbing to write.
+// prints a greeting, logging through the mounted log component. This
+// is how a project's own command components plug into the tree: no
+// dispatch or argument plumbing to write.
 type Greet struct {
 	loong.Base
 }
@@ -21,7 +23,9 @@ func (g *Greet) Run(ctx *loong.Scope) error {
 	if pos := cli.Positional(args); len(pos) > 0 {
 		name = pos[0]
 	}
-	if cli.HasFlag(args, "loud") {
+	loud := cli.HasFlag(args, "loud")
+	slog.Info("greet", "name", name, "loud", loud)
+	if loud {
 		fmt.Printf("HELLO, %s!\n", name)
 		return nil
 	}

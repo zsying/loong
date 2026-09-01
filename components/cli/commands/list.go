@@ -1,4 +1,4 @@
-package cli
+package commands
 
 import (
 	"fmt"
@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/zsying/loong"
+	"github.com/zsying/loong/components/cli"
 )
 
 // List implements the `list` subcommand: it prints the component
@@ -19,7 +20,7 @@ type List struct {
 func (c *List) Run(ctx *loong.Scope) error {
 	args, _ := ctx.Args.([]string)
 	infos := loong.Components()
-	if HasFlag(args, "html") {
+	if cli.HasFlag(args, "html") {
 		fmt.Print(renderListHTML(infos))
 	} else {
 		fmt.Print(renderListText(infos))
