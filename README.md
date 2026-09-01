@@ -68,18 +68,27 @@ Press `Ctrl+C` to shut down gracefully (components are stopped in reverse Run or
 
 ## CLI
 
-`loong` ships a small CLI that is itself a loong application: each subcommand is a component mounted in an embedded config tree (`cmd/loong/cli.yaml`, shipped inline via `go:embed`) and activated on demand.
+CLI applications are built on the platform itself: `components/cli` provides a **cli master** component — same shape as the web channel, it exposes the command `*cli.Context` as a service — plus built-in subcommand components (`cli.list` / `cli.new` / `cli.tree`). Any loong application mounts them in its config tree; `examples/cli` is the working template (master + platform components + custom business commands, multi-level included).
 
 ```bash
-go build -o loong ./cmd/loong
-
-./loong list                # component catalog: services, config keys, events
-./loong list --html         # same, as an HTML table
-./loong new greet           # scaffold a component source file
-./loong tree loong.yaml     # project config tree annotated with services and config
+go run ./examples/cli list                # component catalog of *this* app (platform + business)
+go run ./examples/cli list --html
+go run ./examples/cli new greet           # scaffold a component source file
+go run ./examples/cli tree loong.yaml     # project config tree annotated with services
+go run ./examples/cli greet john --loud   # a custom business command
+go run ./examples/cli config show theme   # multi-level command: group "config" + "show"
 ```
 
-Adding a command means registering a new component type and a node in `cli.yaml` — the dispatch code does not change.
+A CLI is just a loong app: embed a config tree via `go:embed`, call `cli.Go`:
+
+```go
+//go:embed cli.yaml
+var cliYAML []byte
+
+func main() { os.Exit(cli.Go(cliYAML)) }
+```
+
+Adding a command means registering a new component type and a node in `cli.yaml` — the dispatch code never changes.
 
 ## Writing a component
 

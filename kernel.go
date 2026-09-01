@@ -194,6 +194,63 @@ func (k *Kernel) Activate(id string) error {
 	return k.ensureActive(n)
 }
 
+// NodeInfo is the instance-level view of one mounted node, returned
+// by Kernel.Node. It powers tooling such as the cli component's
+// multi-level command dispatch and help rendering (children recurse).
+type NodeInfo struct {
+	ID       string
+	Type     string
+	Lazy     bool
+	Children []*NodeInfo // child nodes, in declaration order
+}
+
+// Node returns instance metadata for the node with the given id, or
+// an error when the id is unknown. It never activates the node.
+func (k *Kernel) Node(id string) (*NodeInfo, error) {
+	k.mu.Lock()
+	n := k.idIndex[id]
+	k.mu.Unlock()
+	if n == nil {
+		return nil, fmt.Errorf("loong: unknown node %q", id)
+	}
+	return k.nodeInfoOf(n), nil
+}
+
+// Component returns the active component instance of the node with
+// the given id, or an error when the id is unknown or the node has
+// not been activated yet. Tooling (e.g. the cli master's dispatch)
+// uses it to reach into a mounted component.
+func (k *Kernel) Component(id string) (Component, error) {
+	k.mu.Lock()
+	n := k.idIndex[id]
+	k.mu.Unlock()
+	if n == nil {
+		return nil, fmt.Errorf("loong: unknown node %q", id)
+	}
+	if n.component == nil {
+		return nil, fmt.Errorf("loong: node %q not activated", id)
+	}
+	return n.component, nil
+}
+
+// Root returns instance metadata for the assembled tree's root node.
+func (k *Kernel) Root() (*NodeInfo, error) {
+	if k.root == nil {
+		return nil, fmt.Errorf("loong: no tree assembled")
+	}
+	return k.nodeInfoOf(k.root), nil
+}
+
+// nodeInfoOf renders a node (and recursively its children) into
+// public metadata.
+func (k *Kernel) nodeInfoOf(n *Node) *NodeInfo {
+	info := &NodeInfo{ID: n.ID, Type: n.Type, Lazy: n.Lazy}
+	for _, c := range n.Children {
+		info.Children = append(info.Children, k.nodeInfoOf(c))
+	}
+	return info
+}
+
 // nearestProvider returns the closest node on the chain from the given
 // node upward (itself included) whose component type declares service
 // type t, or nil when the chain holds no such node.

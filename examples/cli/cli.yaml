@@ -1,0 +1,29 @@
+# CLI 演示：loong 组件树驱动的命令行应用。
+# cli 总控（Eager）提供 *cli.Context 服务；子命令是 lazy 节点，
+# main 按 os.Args 路径逐级激活。config 组演示多级命令。
+type: cli
+config:
+  name: demo-cli
+children:
+  - type: cli.list
+    id: list
+    lazy: true
+  - type: cli.new
+    id: new
+    lazy: true
+  - type: cli.tree
+    id: tree
+    lazy: true
+  - type: cli.group
+    id: config
+    lazy: true
+    children:
+      - type: demo.config.show
+        id: show
+        lazy: true
+      - type: demo.config.set
+        id: set
+        lazy: true
+  - type: demo.greet
+    id: greet
+    lazy: true

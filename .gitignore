@@ -7,3 +7,5 @@
 
 # Project-local data (kept out of the repository)
 .workbuddy/
+./temp/
+./tmp/

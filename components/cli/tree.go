@@ -1,10 +1,9 @@
-package main
+package cli
 
 import (
+	"errors"
 	"fmt"
 	"html"
-	"os"
-	"slices"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -12,32 +11,37 @@ import (
 	"github.com/zsying/loong"
 )
 
-// treeCmd implements `loong tree <config.yaml>`: it prints a project's
-// config tree, annotating each node with its declared services and
-// config keys where the component type is known to the registry.
-type treeCmd struct {
+// Tree implements the `tree` subcommand: it prints a project's config
+// tree, annotating each node with its declared services and config
+// keys where the component type is known to the registry.
+type Tree struct {
 	loong.Base
 }
 
-func (c *treeCmd) Run(*loong.Scope) error {
-	if len(os.Args) < 3 {
-		return fmt.Errorf("loong tree: missing config path (usage: loong tree <config.yaml>)")
+func (c *Tree) Run(ctx *loong.Scope) error {
+	cctx := ctx.Get[*Context]()
+	if cctx == nil {
+		return errors.New("cli: context not mounted (tree requires a cli master)")
 	}
-	root, err := loong.LoadTree(os.Args[2])
+	pos := cctx.Positional()
+	if len(pos) == 0 {
+		return fmt.Errorf("cli tree: missing config path (usage: loong tree <config.yaml>)")
+	}
+	root, err := loong.LoadTree(pos[0])
 	if err != nil {
 		return err
 	}
 	meta := catalogIndex()
-	if slices.Contains(os.Args[3:], "--html") {
-		fmt.Print(renderTreeHTML(root, meta))
+	if cctx.HasFlag("html") {
+		fmt.Fprint(cctx.Out, renderTreeHTML(root, meta))
 	} else {
-		fmt.Print(renderTree(root, meta))
+		fmt.Fprint(cctx.Out, renderTree(root, meta))
 	}
 	return nil
 }
 
 func init() {
-	loong.RegisterComponent("cli.tree", func() loong.Component { return &treeCmd{} },
+	loong.RegisterComponent("cli.tree", func() loong.Component { return &Tree{} },
 		loong.WithDesc("show a project config tree with services and config"),
 	)
 }

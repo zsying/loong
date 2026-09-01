@@ -60,17 +60,16 @@
 | Web 渠道 | 标准库 net/http + golang-jwt |
 | 微信 API | 自写最小 HTTP 封装（不引入 SDK） |
 | 邮件 / unionid | 扩展组件，v0.1 不实现 |
-| 仓库结构 | 核心在根 loong 包 + cmd/loong/ + components/ + examples/ + docs/ |
-| v0.1 验收渠道 | Web |
+| 仓库结构 | 核心在根 loong 包 + components/（含 cli）+ examples/（含 cli）+ docs/ |
+| v0.1 验收渠道 | Web / CLI |
 
 ### 2.2 仓库结构
 
 ```
 loong/
 ├── *.go           # 内核（package loong，仓库根即平台核心）
-├── cmd/loong/     # 平台 CLI：list / new / tree，本身是 loong 组件树应用
-├── components/    # 平台组件：log / user / web（wechat、tui 后续补）
-├── examples/      # 示例项目（v0.1: hello，跑通 Web 渠道）
+├── components/    # 平台组件：log / user / web / cli（wechat、tui 后续补）
+├── examples/      # 示例项目（hello：Web 渠道；cli：CLI 组件化模板）
 └── docs/          # 设计文档
 ```
 
@@ -190,6 +189,16 @@ children:
 - **服务提供的约定**：服务的**唯一声明入口**是注册选项 `WithService[T](get)`——`get` 是取值函数，激活后从组件实例取出服务值，类型由泛型参数编译期固定（无 `any`、无运行期校验）。一个组件可声明多个服务（多次 `WithService`）。服务按「类型 → 节点 id」登记，**同类型允许多个提供者并存**（如 main / admin 两个 web 实例），不再有装配期唯一性约束。查找只通过 `Scope`：`scope.Get[T]()` 在唯一提供者时直接命中；多提供者时沿「自身 + 父链向上」取最近的声明者（组件挂在哪就属于哪，契合重用组件的父子约定），父链无匹配则报错提示 `GetFrom[T](id)` 按节点 id 显式取。惰性激活遵循同一优先级：多候选时只激活父链命中的节点。服务组件（声明了 `WithService`）默认惰性，`Eager()` 覆盖为启动激活（渠道如 web）；`TryGet / TryGetFrom` 报告错误，`Get / GetFrom` 返回零值；`Activate(id)` 可手动激活任意 lazy 节点。组件发现用 `loong.Components()`（type / desc / service / eager / emits 元数据）。
 - **装配失败清理**：Build / Run 阶段任一组件失败，已 Build 的组件会按逆序 Stop（释放 db / server 等资源），`Shutdown` 在未装配或装配失败后调用均为安全空操作。
 - **约束**：组件的可变部分必须走配置 / 接口，不能写死全局状态。
+
+### 4.4 CLI 组件化（cli 模式）
+
+CLI 应用与常驻渠道共用同一心智：**父组件提供能力（服务），子组件消费**。`components/cli` 提供：
+
+- **cli 总控**（type `cli`，Eager）：从 os.Args 构建命令 `*cli.Context`（参数、输出流、退出码 + flag 解析辅助），以服务暴露给子命令；子命令 `ctx.Get[*cli.Context]()` 消费，不直接碰 os.Args。
+- **命令 = lazy 子组件**：`cli.list` / `cli.new` / `cli.tree` 及业务命令组件挂载在总控下，`main` 按命令路径 `Activate` 逐级激活执行。
+- **多级命令 = 树层级**：命令组是 `cli.group` 容器（`config` 下挂 `show` / `set`）；dispatch 沿路径激活，组被直接调用或叶命令被追加"子命令"均视为 usage 错误（退出码 2）；叶命令之后的参数交给命令自己（通过 Context）。
+- **一键入口**：包级 `cli.Go(yamlData)`——Parse 内联配置树 → Assemble → dispatch(os.Args) → Shutdown → 退出码；业务 CLI 的 main 只有两行（embed + `os.Exit(cli.Go(cliYAML))`）。
+- 任何 loong 应用挂载这些组件即可获得组件化 CLI；`examples/cli` 是完整模板（总控 + 平台组件 + 业务命令 + 多级命令）。扩展命令 = 注册组件类型 + yaml 加 lazy 节点。
 
 ## 5. 渠道适配
 

@@ -1,10 +1,9 @@
-package main
+package cli
 
 import (
+	"errors"
 	"fmt"
 	"html"
-	"os"
-	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -12,23 +11,28 @@ import (
 	"github.com/zsying/loong"
 )
 
-// listCmd implements `loong list`: it prints the component catalog.
-type listCmd struct {
+// List implements the `list` subcommand: it prints the component
+// catalog.
+type List struct {
 	loong.Base
 }
 
-func (c *listCmd) Run(*loong.Scope) error {
+func (c *List) Run(ctx *loong.Scope) error {
+	cctx := ctx.Get[*Context]()
+	if cctx == nil {
+		return errors.New("cli: context not mounted (list requires a cli master)")
+	}
 	infos := loong.Components()
-	if slices.Contains(os.Args[2:], "--html") {
-		fmt.Print(renderListHTML(infos))
+	if cctx.HasFlag("html") {
+		fmt.Fprint(cctx.Out, renderListHTML(infos))
 	} else {
-		fmt.Print(renderListText(infos))
+		fmt.Fprint(cctx.Out, renderListText(infos))
 	}
 	return nil
 }
 
 func init() {
-	loong.RegisterComponent("cli.list", func() loong.Component { return &listCmd{} },
+	loong.RegisterComponent("cli.list", func() loong.Component { return &List{} },
 		loong.WithDesc("list registered components (services, config, events)"),
 	)
 }
