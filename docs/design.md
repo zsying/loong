@@ -146,15 +146,15 @@ Application Root
 **配置树设计（YAML · 两段式解析）**：
 
 - 节点 schema 统一：`{type, id?, config?, children?}`，平台只解析这 4 个字段；`config` 是不透明字节（yaml.Node），原样传给对应组件，不再深入。
-- **根节点就是配置树的第一个节点**（无需 `root:` 包装键）。
+- **根节点就是配置树的第一个节点**（无需 `root:` 包装键）；根通常是内核内置的 **`base` 容器**（无行为生命周期，`loong.Container` 注册），项目无需为纯容器根声明自定义组件。
 - **组件自描述（schema-per-component）**：组件注册自己的配置 struct（`WithConfig[T]`，元数据进 `Components()`：字段名 / 类型 / 可选性），Build 里用 `scope.Config[T]()` 解码——**严格模式**：未知字段报错并带节点 id（typo 在激活期暴露而非静默忽略）；无 config 块返回零值。使用者在写 yaml 前即可通过 `Components()` 查看组件接受哪些 key。
 - 平台永远不需要知道完整 schema → 新增组件只需注册自己的 struct，配置结构随组件自由变化，无需改平台。
 - 继承与覆盖优先级：实例 config（配置树声明）> 父组件 build 期增强（下行 props）> 组件默认值。
 - 环境差异（dev / prod）：v0.1 用 `${ENV}` 环境变量覆盖，不做多层配置合并。注意展开是**文本级**（YAML 解析前替换），值含 YAML 敏感字符（`:` `#` 引号）时需在配置里加引号。
 
 ```yaml
-# loong.yaml — 每个项目的配置树
-type: app
+# loong.yaml — 每个项目的配置树（根可用内核内置 base 容器，无需自定义）
+type: base
 config:
   name: myproject
 children:

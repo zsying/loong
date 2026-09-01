@@ -141,10 +141,10 @@ func init() {
 }
 ```
 
-Then declare the component in your config tree (`loong.yaml`):
+Then declare the component in your config tree (`loong.yaml`). The root can be the kernel-provided `base` container — a no-op root that needs no custom component declaration:
 
 ```yaml
-type: app
+type: base
 config:
   name: myproject
 children:

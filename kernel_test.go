@@ -183,6 +183,31 @@ func TestParse(t *testing.T) {
 	}
 }
 
+// TestBaseContainer verifies the kernel-provided "base" container
+// serves as a no-op root: it assembles with children and runs without
+// any custom component declaration.
+func TestBaseContainer(t *testing.T) {
+	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	root := &Node{
+		Type: "base", ID: "root",
+		Children: []*Node{{Type: "test.spy", ID: "child", Lazy: true}},
+	}
+	k := New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	info, err := k.Node("root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Type != "base" || len(info.Children) != 1 {
+		t.Errorf("root info = %+v", info)
+	}
+	if err := k.Activate("child"); err != nil {
+		t.Fatalf("activate child: %v", err)
+	}
+}
+
 // buildFail fails during Build.
 type buildFail struct {
 	Base

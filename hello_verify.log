@@ -1,0 +1,2 @@
+22:54:51 INF web listening addr=:8080
+22:54:51 INF event received name=biz.greet.hello source=greet payload="map[msg:greetings from biz]"

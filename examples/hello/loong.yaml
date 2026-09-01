@@ -1,4 +1,4 @@
-type: app
+type: base
 config:
   name: hello
 children:

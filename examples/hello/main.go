@@ -1,7 +1,9 @@
 // Command hello is the v0.1 sample project. It demonstrates the loong
 // kernel with log, user and web components, plus a business component
 // mounted under the web channel, started via loong.LoadAndRun and shut
-// down gracefully on SIGINT/SIGTERM.
+// down gracefully on SIGINT/SIGTERM. The config tree root uses the
+// kernel-provided "base" container, so no custom root component is
+// declared here.
 package main
 
 import (
@@ -15,11 +17,6 @@ import (
 
 	"github.com/zsying/loong"
 )
-
-// app is the root container component.
-type app struct {
-	loong.Base
-}
 
 type greetConfig struct {
 	Route string `yaml:"route"`
@@ -51,7 +48,6 @@ func (g *greet) Build(ctx *loong.Scope) error {
 }
 
 func init() {
-	loong.RegisterComponent("app", func() loong.Component { return &app{} })
 	loong.RegisterComponent("biz.greet", func() loong.Component { return &greet{} },
 		loong.WithConfig[greetConfig](),
 		loong.WithEvents("biz.greet.hello"),
