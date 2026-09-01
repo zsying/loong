@@ -79,13 +79,20 @@ go run ./examples/cli greet john --loud   # a custom business command
 go run ./examples/cli config show theme   # multi-level command: group "config" + "show"
 ```
 
-A CLI is just a loong app: embed a config tree via `go:embed`, call `cli.Go` (or use the plain standard API / `LoadAndRun` for a file-based tree — all three are shown in `examples/cli`):
+A CLI is just a loong app — mount the components in a config tree (embedded via `go:embed`, or as a file with `loong.LoadAndRun`), and main only starts the app and maps errors to exit codes. Both entry styles are shown in `examples/cli`:
 
 ```go
 //go:embed cli.yaml
 var cliYAML []byte
 
-func main() { os.Exit(cli.Go(cliYAML)) }
+root, err := loong.Parse(cliYAML) // or loong.LoadAndRun("cli.yaml") for a file
+if err != nil { os.Exit(1) }
+k := loong.New()
+if err := k.Assemble(root); err != nil { // the master runs the command here
+    _ = k.Shutdown()
+    os.Exit(2) // if errors.Is(err, cli.ErrUsage) — see examples/cli
+}
+_ = k.Shutdown()
 ```
 
 Adding a command means registering a new component type and a node in `cli.yaml` — no dispatch code anywhere.

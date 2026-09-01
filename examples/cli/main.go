@@ -1,17 +1,16 @@
 // Command cli demonstrates building a CLI as a loong component tree:
 // a cli master (importing components/cli) plus platform components and
-// custom business command components, all wired through an embedded
-// config tree. The activation chain is pure framework — the master
-// parses the command line and activates the matching child via
-// scope.Activate, arguments flow down through scope.Args, and command
-// groups (cli.group) forward to their children. No dispatch code
-// lives outside the components.
+// custom business command components, all wired through a config tree.
+// The activation chain is pure framework — the master parses the
+// command line and activates the matching child via scope.Activate,
+// arguments flow down through scope.Args, and command groups
+// (cli.group) forward to their children. No dispatch code lives
+// outside the components; main only starts the app, maps errors to
+// exit codes, and shuts down (the command runs during assembly).
 //
-// Three entry styles are shown: the packaged one-liner (cli.Go), the
-// plain standard API, and LoadAndRun for a file-based tree. In all of
-// them the command runs during assembly (the eager master activates
-// it), so main only starts the app, maps errors to exit codes, and
-// shuts down.
+// Two entry styles are shown: an embedded config tree with the plain
+// standard API (default), and LoadAndRun for a file-based tree — the
+// only difference is where the tree comes from.
 package main
 
 import (
@@ -31,12 +30,7 @@ import (
 var cliYAML []byte
 
 func main() {
-	// Way 1 — packaged one-liner: parse the embedded tree, assemble
-	// (the master activates the command), shut down, exit code.
-	//
-	//   os.Exit(cli.Go(cliYAML))
-
-	// Way 2 — plain standard API with an embedded tree (default here).
+	// Entry 1 — embedded config tree via the plain standard API.
 	root, err := loong.Parse(cliYAML)
 	if err != nil {
 		os.Exit(1)
@@ -50,7 +44,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Way 3 — the most general entry: config tree from a file (no
+	// Entry 2 — the most general entry: config tree from a file (no
 	// embed), LoadAndRun + error mapping. Swap the block above for:
 	//
 	//   k, err := loong.LoadAndRun("./cli.yaml")
@@ -62,8 +56,8 @@ func main() {
 	//   }
 }
 
-// exitCode maps an error to a process exit code: usage errors (cli's
-// ErrUsage) are 2, everything else is 1.
+// exitCode maps an error to a process exit code — an application-level
+// choice: usage errors (cli.ErrUsage) are 2, everything else is 1.
 func exitCode(err error) int {
 	if errors.Is(err, cli.ErrUsage) {
 		return 2

@@ -198,8 +198,8 @@ CLI 应用与常驻渠道共用同一心智：**父组件定义其子节点的�
 - **cli 总控**（type `cli`，Eager）：`Run` 解析 os.Args，第一个参数是命令名——`ctx.Activate(args[0], args[1:])` 激活对应子命令并把剩余参数传下去；无参数或未知命令返回 `ErrUsage`（退出码 2）。
 - **命令 = lazy 子组件**：`cli.list` / `cli.new` / `cli.tree` 及业务命令组件挂载在总控下，`Run` 里读 `ctx.Args` 执行；`cli` 包提供 `HasFlag` / `Flag` / `Positional` 参数解析辅助。
 - **多级命令 = 树层级**：命令组是通用 `cli.group` 容器（`config` 下挂 `show` / `set`），其 `Run` 就是"把第一个参数当子命令 `Activate` 下去，剩余参数传递"——组组件零定制，任何层级复用同一类型；组被直接调用（无子命令）返回 `ErrUsage`。
-- **退出码**：成功 0；命令/装配错误 1；`ErrUsage` 2（`errors.Is` 判断）。命令在装配期执行（总控 Run 触发），`main` 只负责启动 + 错误映射 + `Shutdown`。
-- **一键入口**：包级 `cli.Go(yamlData)`——Parse 内联配置树 → Assemble（命令自动执行）→ Shutdown → 退出码；业务 CLI 的 main 只有两行（embed + `os.Exit(cli.Go(cliYAML))`）。配置树在文件里时用 `LoadAndRun` 同样可行。
+- **退出码**：`ErrUsage` sentinel 标记用法错误（错误分类由 cli 包给出，映射到具体数字是应用级决策——examples/cli 用 2）。命令在装配期执行（总控 Run 触发），`main` 只负责启动 + 错误映射 + `Shutdown`。
+- **入口 = 普通 loong 应用**：不提供启动封装（无 cli.Go）——配置树内联用 `Parse + New + Assemble`，文件用 `loong.LoadAndRun`，退出码映射由 main 决定；examples/cli 展示两种入口。
 - 任何 loong 应用挂载这些组件即可获得组件化 CLI；`examples/cli` 是完整模板（总控 + 平台组件 + 业务命令 + 多级命令）。扩展命令 = 注册组件类型 + yaml 加 lazy 节点。
 
 ## 5. 渠道适配
