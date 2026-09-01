@@ -32,9 +32,18 @@ func (c *Component) Build(scope *loong.Scope) error {
 	// not need — it knows its own identity. Skipping it keeps the plain
 	// standard-API path (Assemble + Activate) working with the same
 	// Context semantics as cli.Go, whose dispatch overwrites the args
-	// with the leaf command's own arguments anyway.
-	c.Ctx = NewContext(os.Args[2:], os.Stdout, os.Stderr)
+	// with the leaf command's own arguments anyway. Nil-safe: with no
+	// arguments there is nothing after the command name.
+	c.Ctx = NewContext(skipArgs(os.Args, 2), os.Stdout, os.Stderr)
 	return nil
+}
+
+// skipArgs returns a[n:] when the slice is long enough, else nil.
+func skipArgs(a []string, n int) []string {
+	if len(a) <= n {
+		return nil
+	}
+	return a[n:]
 }
 
 func init() {
@@ -66,7 +75,7 @@ func Go(yamlData []byte) int {
 		slog.Error("assemble", "err", err)
 		return 1
 	}
-	code := dispatch(k, os.Args[1:])
+	code := Dispatch(k, os.Args[1:])
 	if err := k.Shutdown(); err != nil {
 		slog.Error("shutdown", "err", err)
 		if code == 0 {

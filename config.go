@@ -39,7 +39,7 @@ var envRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}`)
 // placeholders before parsing (text-level, same semantics as
 // LoadTree). It is the entry point for embedding a config tree into a
 // program — e.g. a CLI that ships its component tree inline via
-// go:embed.
+// "go:embed".
 func Parse(data []byte) (*Node, error) {
 	data = envRe.ReplaceAllFunc(data, func(m []byte) []byte {
 		return []byte(os.Getenv(string(m[2 : len(m)-1])))

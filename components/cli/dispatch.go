@@ -8,14 +8,18 @@ import (
 	"github.com/zsying/loong"
 )
 
-// dispatch walks the command path (e.g. ["config", "show", "theme"])
+// Dispatch walks the command path (e.g. ["config", "show", "theme"])
 // and activates each node in order. The command hierarchy mirrors the
 // component tree: a node with children is a command group, a node
 // without children is a leaf command. Only groups accept a next-level
 // command; arguments after the leaf command are the command's own and
 // are handed to it through the master's Context. Invoking a group
 // directly (no subcommand) is a usage error. Returns the exit code.
-func dispatch(k *loong.Kernel, args []string) int {
+//
+// Dispatch is the reusable CLI-domain logic behind cli.Go — call it
+// directly when driving a CLI through the standard API (e.g.
+// loong.LoadAndRun for a file-based config tree).
+func Dispatch(k *loong.Kernel, args []string) int {
 	if len(args) == 0 {
 		return usage(k)
 	}

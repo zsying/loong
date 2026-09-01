@@ -68,11 +68,11 @@ func TestDispatch(t *testing.T) {
 	k := regTestTree(t)
 
 	// Leaf command.
-	if code := dispatch(k, []string{"list"}); code != 0 {
+	if code := Dispatch(k, []string{"list"}); code != 0 {
 		t.Errorf("dispatch(list) = %d, want 0", code)
 	}
 	// Arguments after the leaf command are injected into Context.
-	if code := dispatch(k, []string{"list", "--html"}); code != 0 {
+	if code := Dispatch(k, []string{"list", "--html"}); code != 0 {
 		t.Errorf("dispatch(list --html) = %d, want 0", code)
 	}
 	master, err := k.Component("root")
@@ -83,23 +83,23 @@ func TestDispatch(t *testing.T) {
 		t.Errorf("leaf args injected = %v, want [--html]", got)
 	}
 	// Multi-level command path.
-	if code := dispatch(k, []string{"config", "show"}); code != 0 {
+	if code := Dispatch(k, []string{"config", "show"}); code != 0 {
 		t.Errorf("dispatch(config show) = %d, want 0", code)
 	}
 	// Group invoked directly -> usage error.
-	if code := dispatch(k, []string{"config"}); code != 2 {
+	if code := Dispatch(k, []string{"config"}); code != 2 {
 		t.Errorf("dispatch(config) = %d, want 2", code)
 	}
 	// Unknown command.
-	if code := dispatch(k, []string{"nope"}); code != 1 {
+	if code := Dispatch(k, []string{"nope"}); code != 1 {
 		t.Errorf("dispatch(nope) = %d, want 1", code)
 	}
 	// Arguments after a leaf command are the command's own (legal).
-	if code := dispatch(k, []string{"list", "extra"}); code != 0 {
+	if code := Dispatch(k, []string{"list", "extra"}); code != 0 {
 		t.Errorf("dispatch(list extra) = %d, want 0 (extra is a command argument)", code)
 	}
 	// No arguments -> usage.
-	if code := dispatch(k, nil); code != 2 {
+	if code := Dispatch(k, nil); code != 2 {
 		t.Errorf("dispatch() = %d, want 2", code)
 	}
 }
