@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -18,17 +17,14 @@ type New struct {
 }
 
 func (c *New) Run(ctx *loong.Scope) error {
-	cctx := ctx.Get[*Context]()
-	if cctx == nil {
-		return errors.New("cli: context not mounted (new requires a cli master)")
-	}
-	pos := cctx.Positional()
+	args, _ := ctx.Args.([]string)
+	pos := Positional(args)
 	if len(pos) == 0 {
-		return fmt.Errorf("cli new: missing component name (usage: loong new <name>)")
+		return fmt.Errorf("cli new: missing component name (usage: cli new <name>)")
 	}
 	name := pos[0]
 	outDir := "."
-	if d, ok := cctx.Flag("o"); ok {
+	if d, ok := Flag(args, "o"); ok {
 		outDir = d
 	}
 	src, err := scaffoldComponent(name)
@@ -39,7 +35,7 @@ func (c *New) Run(ctx *loong.Scope) error {
 	if err := os.WriteFile(out, []byte(src), 0o644); err != nil {
 		return err
 	}
-	fmt.Fprintf(cctx.Out, "created %s\n", out)
+	fmt.Printf("created %s\n", out)
 	return nil
 }
 

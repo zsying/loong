@@ -1,35 +1,31 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/zsying/loong"
 	"github.com/zsying/loong/components/cli"
 )
 
-// Greet is a business command component: it reads the command context
-// from the cli master (parent chain) and prints a greeting. It shows
-// how a project's own command components plug into the same tree.
+// Greet is a business command component. It reads its arguments from
+// scope.Args — injected by the cli master via scope.Activate — and
+// prints a greeting. This is how a project's own command components
+// plug into the tree: no dispatch or argument plumbing to write.
 type Greet struct {
 	loong.Base
 }
 
 func (g *Greet) Run(ctx *loong.Scope) error {
-	cctx := ctx.Get[*cli.Context]()
-	if cctx == nil {
-		return errors.New("cli: context not mounted")
-	}
-	pos := cctx.Positional()
+	args, _ := ctx.Args.([]string)
 	name := "world"
-	if len(pos) > 0 {
+	if pos := cli.Positional(args); len(pos) > 0 {
 		name = pos[0]
 	}
-	if cctx.HasFlag("loud") {
-		fmt.Fprintf(cctx.Out, "HELLO, %s!\n", name)
+	if cli.HasFlag(args, "loud") {
+		fmt.Printf("HELLO, %s!\n", name)
 		return nil
 	}
-	fmt.Fprintf(cctx.Out, "hello, %s\n", name)
+	fmt.Printf("hello, %s\n", name)
 	return nil
 }
 
@@ -39,23 +35,19 @@ func init() {
 	)
 }
 
-// ConfigShow prints the value of a demo config key (multi-level
-// command demo: `config show <key>`).
+// ConfigShow prints a demo config key (multi-level command demo:
+// `config show <key>` — the group forwards the leaf args).
 type ConfigShow struct {
 	loong.Base
 }
 
 func (c *ConfigShow) Run(ctx *loong.Scope) error {
-	cctx := ctx.Get[*cli.Context]()
-	if cctx == nil {
-		return errors.New("cli: context not mounted")
-	}
-	pos := cctx.Positional()
+	args, _ := ctx.Args.([]string)
+	pos := cli.Positional(args)
 	if len(pos) == 0 {
 		return fmt.Errorf("config show: missing key (usage: config show <key>)")
 	}
-	// Demo store: echo back a placeholder value.
-	fmt.Fprintf(cctx.Out, "%s = (unset)\n", pos[0])
+	fmt.Printf("%s = (unset)\n", pos[0])
 	return nil
 }
 
@@ -66,15 +58,12 @@ type ConfigSet struct {
 }
 
 func (c *ConfigSet) Run(ctx *loong.Scope) error {
-	cctx := ctx.Get[*cli.Context]()
-	if cctx == nil {
-		return errors.New("cli: context not mounted")
-	}
-	pos := cctx.Positional()
+	args, _ := ctx.Args.([]string)
+	pos := cli.Positional(args)
 	if len(pos) < 2 {
 		return fmt.Errorf("config set: usage: config set <key> <value>")
 	}
-	fmt.Fprintf(cctx.Out, "%s = %s (saved)\n", pos[0], pos[1])
+	fmt.Printf("%s = %s (saved)\n", pos[0], pos[1])
 	return nil
 }
 

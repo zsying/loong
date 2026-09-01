@@ -1,18 +1,22 @@
 // Command cli demonstrates building a CLI as a loong component tree:
 // a cli master (importing components/cli) plus platform components and
 // custom business command components, all wired through an embedded
-// config tree. Any loong application can do the same — the master +
-// subcommand shape is the template for CLI development.
+// config tree. The activation chain is pure framework — the master
+// parses the command line and activates the matching child via
+// scope.Activate, arguments flow down through scope.Args, and command
+// groups (cli.group) forward to their children. No dispatch code
+// lives outside the components.
 //
-// Two equivalent ways to drive it are shown below: the packaged
-// one-liner (cli.Go) and the plain standard-API version (same steps,
-// written out). cli.Go is just the standard API plus CLI-domain logic
-// (multi-level dispatch, exit codes, argument injection); the plain
-// version is what you write when the command dispatch stays trivial.
+// Three entry styles are shown: the packaged one-liner (cli.Go), the
+// plain standard API, and LoadAndRun for a file-based tree. In all of
+// them the command runs during assembly (the eager master activates
+// it), so main only starts the app, maps errors to exit codes, and
+// shuts down.
 package main
 
 import (
 	_ "embed"
+	"errors"
 	"log"
 	"os"
 
@@ -27,47 +31,43 @@ import (
 var cliYAML []byte
 
 func main() {
-	// Way 1 — packaged template: parse the embedded tree, assemble,
-	// dispatch the command path from os.Args (multi-level included),
-	// shut down, and return a normalized exit code.
+	// Way 1 — packaged one-liner: parse the embedded tree, assemble
+	// (the master activates the command), shut down, exit code.
 	//
 	//   os.Exit(cli.Go(cliYAML))
 
-	// Way 2 — plain standard API (equivalent for a single command;
-	// multi-level paths like "config show" need Dispatch, which lives
-	// in components/cli — the standard API has no notion of command
-	// paths). Every step is a core loong call; the command nodes are
-	// lazy, so assembly only activates the eager cli master, and
-	// Activate runs exactly the requested command.
-	// if len(os.Args) < 2 {
-	// 	os.Exit(2)
-	// }
-	// root, err := loong.Parse(cliYAML)
-	// if err != nil {
-	// 	os.Exit(1)
-	// }
-	// k := loong.New()
-	// if err := k.Assemble(root); err != nil {
-	// 	os.Exit(1)
-	// }
-	// if err := k.Activate(os.Args[1]); err != nil {
-	// 	_ = k.Shutdown()
-	// 	os.Exit(1)
-	// }
-	// _ = k.Shutdown()
-
-	// Way 3 — the most general loong entry: LoadAndRun reads the
-	// config tree from a file (no embed), assembles it and runs the
-	// eager cli master; cli.Dispatch then drives the requested command
-	// (multi-level included) with a normalized exit code. Use this
-	// when the tree lives beside the binary rather than embedded.
-	k, err := loong.LoadAndRun("./cli.yaml")
+	// Way 2 — plain standard API with an embedded tree (default here).
+	root, err := loong.Parse(cliYAML)
 	if err != nil {
-		log.Fatal(err)
+		os.Exit(1)
 	}
-	code := cli.Dispatch(k, os.Args[1:])
-	if err := k.Shutdown(); err != nil && code == 0 {
-		code = 1
+	k := loong.New()
+	if err := k.Assemble(root); err != nil { // the master runs the command here
+		_ = k.Shutdown()
+		os.Exit(exitCode(err))
 	}
-	os.Exit(code)
+	if err := k.Shutdown(); err != nil {
+		os.Exit(1)
+	}
+
+	// Way 3 — the most general entry: config tree from a file (no
+	// embed), LoadAndRun + error mapping. Swap the block above for:
+	//
+	//   k, err := loong.LoadAndRun("./cli.yaml")
+	//   if err != nil {
+	//       os.Exit(exitCode(err))
+	//   }
+	//   if err := k.Shutdown(); err != nil {
+	//       os.Exit(1)
+	//   }
+}
+
+// exitCode maps an error to a process exit code: usage errors (cli's
+// ErrUsage) are 2, everything else is 1.
+func exitCode(err error) int {
+	if errors.Is(err, cli.ErrUsage) {
+		return 2
+	}
+	log.Print(err)
+	return 1
 }

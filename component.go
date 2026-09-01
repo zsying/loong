@@ -22,10 +22,30 @@ type Component interface {
 // Named Scope (not Context) to avoid clashing with the standard
 // library context.Context. Raw is the opaque config node; components
 // decode it into their own struct via Config[T] (schema-per-component).
+// Args holds the value passed to Scope.Activate when this node was
+// activated by its parent (nil for startup or service activation) —
+// the mechanism by which a parent defines how its children activate.
 type Scope struct {
 	Kernel *Kernel
 	Node   *Node
 	Raw    yaml.Node
+	Args   any
+}
+
+// Activate activates one of this node's direct children by id,
+// passing args to it through the child's Scope.Args. It is the
+// parent-defined activation primitive: the parent decides which child
+// runs and what it receives (e.g. a CLI master activating the command
+// named by the first argument). The child id must be a direct child;
+// returns an error otherwise. Activation stays idempotent per node —
+// args apply on first activation.
+func (s *Scope) Activate(id string, args any) error {
+	for _, c := range s.Node.Children {
+		if c.ID == id {
+			return s.Kernel.ensureActive(c, args)
+		}
+	}
+	return fmt.Errorf("loong: node %q has no child %q", s.Node.ID, id)
 }
 
 // Emit sends an event upward to the direct parent node.

@@ -1,64 +1,87 @@
 // Package cli provides the CLI building blocks for loong applications.
 // It follows the same pattern as the web channel: a cli master
-// component (type "cli", eager) exposes the command *Context as a
-// service, and subcommand components (cli.list, cli.new, ...) mount
-// under it as lazy nodes. Any loong application can mount these
-// components and get a component-driven CLI; the master + subcommand
-// shape is the template for building custom CLI applications.
+// component (type "cli", eager) parses the command line and activates
+// the matching child command, and subcommand components (cli.list,
+// cli.new, ...) mount under it as lazy nodes. The activation chain is
+// pure framework — every level calls scope.Activate(child, args),
+// passing arguments through scope.Args — so no dispatch logic lives
+// outside the components. Any loong application can mount these
+// components and get a component-driven CLI.
 //
 // The package-level Go function is the one-line entry point for a
-// standalone CLI: parse an embedded config tree, assemble, dispatch
-// the command path from os.Args, shut down, and return the exit code.
+// standalone CLI: parse an embedded config tree, assemble (which runs
+// the command), shut down, and return the exit code.
 package cli
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 
 	"github.com/zsying/loong"
 )
 
-// Component is the cli master: it builds the command Context from
-// os.Args and exposes it as a service for mounted subcommands. Like
-// the web channel it is eager — running at assembly — so its service
-// is available to subcommands activated later.
+// ErrUsage marks a command-line usage error (unknown or incomplete
+// invocation); callers map it to exit code 2.
+var ErrUsage = errors.New("cli: usage error")
+
+// Component is the cli master: it parses os.Args and activates the
+// child command named by the first argument, passing the rest as the
+// command's arguments via Scope.Activate.
 type Component struct {
 	loong.Base
-	Ctx *Context
 }
 
-func (c *Component) Build(scope *loong.Scope) error {
-	// The first argument is the command name, which the subcommand does
-	// not need — it knows its own identity. Skipping it keeps the plain
-	// standard-API path (Assemble + Activate) working with the same
-	// Context semantics as cli.Go, whose dispatch overwrites the args
-	// with the leaf command's own arguments anyway. Nil-safe: with no
-	// arguments there is nothing after the command name.
-	c.Ctx = NewContext(skipArgs(os.Args, 2), os.Stdout, os.Stderr)
-	return nil
-}
-
-// skipArgs returns a[n:] when the slice is long enough, else nil.
-func skipArgs(a []string, n int) []string {
-	if len(a) <= n {
-		return nil
+func (c *Component) Run(ctx *loong.Scope) error {
+	args := os.Args[1:]
+	if len(args) == 0 {
+		return usage(ctx)
 	}
-	return a[n:]
+	return ctx.Activate(args[0], args[1:])
 }
 
 func init() {
 	loong.RegisterComponent("cli", func() loong.Component { return &Component{} },
-		loong.WithService(func(c loong.Component) *Context { return c.(*Component).Ctx }),
-		loong.Eager(), // master runs at assembly so Context is ready
-		loong.WithDesc("CLI master: command context and subcommand mount point"),
+		loong.Eager(), // master runs at assembly so the command fires
+		loong.WithDesc("CLI master: parses the command line and activates the command"),
 	)
 }
 
+// usage prints the command tree under the master and returns ErrUsage.
+func usage(ctx *loong.Scope) error {
+	fmt.Println("usage: <command>")
+	printCommands(ctx.Node.Children, 1)
+	return ErrUsage
+}
+
+// printCommands renders a node's children with indentation, marking
+// command groups with their subcommands.
+func printCommands(cmds []*loong.Node, depth int) {
+	indent := strings.Repeat("  ", depth)
+	for _, c := range cmds {
+		if len(c.Children) > 0 {
+			fmt.Printf("%s%s <%s>\n", indent, c.ID, groupNames(c.Children))
+			continue
+		}
+		fmt.Printf("%s%s\n", indent, c.ID)
+	}
+}
+
+func groupNames(children []*loong.Node) string {
+	names := make([]string, 0, len(children))
+	for _, c := range children {
+		names = append(names, c.ID)
+	}
+	return strings.Join(names, ", ")
+}
+
 // Go runs a standalone CLI application from an embedded config tree:
-// parse, assemble, dispatch the command path (os.Args[1:]) by
-// activating the matching lazy nodes, shut down, and return the exit
-// code. Command components and the cli master must be registered —
-// import this package and any custom command component packages.
+// parse, assemble (the eager master activates the command during
+// assembly), shut down, and return the exit code. Command components
+// and the cli master must be registered — import this package and any
+// custom command component packages.
 //
 //	//go:embed cli.yaml
 //	var cliYAML []byte
@@ -72,15 +95,18 @@ func Go(yamlData []byte) int {
 	}
 	k := loong.New()
 	if err := k.Assemble(root); err != nil {
-		slog.Error("assemble", "err", err)
+		// Assembly is where the command runs (master Run activates it);
+		// an error here is the command's outcome.
+		_ = k.Shutdown()
+		if errors.Is(err, ErrUsage) {
+			return 2
+		}
+		slog.Error("command failed", "err", err)
 		return 1
 	}
-	code := Dispatch(k, os.Args[1:])
 	if err := k.Shutdown(); err != nil {
 		slog.Error("shutdown", "err", err)
-		if code == 0 {
-			code = 1
-		}
+		return 1
 	}
-	return code
+	return 0
 }

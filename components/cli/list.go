@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"html"
 	"sort"
@@ -18,15 +17,12 @@ type List struct {
 }
 
 func (c *List) Run(ctx *loong.Scope) error {
-	cctx := ctx.Get[*Context]()
-	if cctx == nil {
-		return errors.New("cli: context not mounted (list requires a cli master)")
-	}
+	args, _ := ctx.Args.([]string)
 	infos := loong.Components()
-	if cctx.HasFlag("html") {
-		fmt.Fprint(cctx.Out, renderListHTML(infos))
+	if HasFlag(args, "html") {
+		fmt.Print(renderListHTML(infos))
 	} else {
-		fmt.Fprint(cctx.Out, renderListText(infos))
+		fmt.Print(renderListText(infos))
 	}
 	return nil
 }

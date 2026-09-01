@@ -68,7 +68,7 @@ Press `Ctrl+C` to shut down gracefully (components are stopped in reverse Run or
 
 ## CLI
 
-CLI applications are built on the platform itself: `components/cli` provides a **cli master** component — same shape as the web channel, it exposes the command `*cli.Context` as a service — plus built-in subcommand components (`cli.list` / `cli.new` / `cli.tree`). Any loong application mounts them in its config tree; `examples/cli` is the working template (master + platform components + custom business commands, multi-level included).
+CLI applications are built on the platform itself, using the **parent-defined activation** primitive (`scope.Activate(child, args)` — a parent activates one of its direct children and arguments flow through `scope.Args`). `components/cli` provides a **cli master** (parses the command line and activates the matching child command), a generic `cli.group` container for multi-level commands, and built-in subcommands (`cli.list` / `cli.new` / `cli.tree`). Any loong application mounts them in its config tree; `examples/cli` is the working template (master + platform components + custom business commands, multi-level included).
 
 ```bash
 go run ./examples/cli list                # component catalog of *this* app (platform + business)
@@ -79,7 +79,7 @@ go run ./examples/cli greet john --loud   # a custom business command
 go run ./examples/cli config show theme   # multi-level command: group "config" + "show"
 ```
 
-A CLI is just a loong app: embed a config tree via `go:embed`, call `cli.Go`:
+A CLI is just a loong app: embed a config tree via `go:embed`, call `cli.Go` (or use the plain standard API / `LoadAndRun` for a file-based tree — all three are shown in `examples/cli`):
 
 ```go
 //go:embed cli.yaml
@@ -88,7 +88,7 @@ var cliYAML []byte
 func main() { os.Exit(cli.Go(cliYAML)) }
 ```
 
-Adding a command means registering a new component type and a node in `cli.yaml` — the dispatch code never changes.
+Adding a command means registering a new component type and a node in `cli.yaml` — no dispatch code anywhere.
 
 ## Writing a component
 

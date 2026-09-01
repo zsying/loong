@@ -37,7 +37,7 @@ func (k *Kernel) lookup[T any](from *Node, id string) (T, error) {
 			return zero, fmt.Errorf("loong: node %q does not provide %s", id, t)
 		}
 		k.mu.Unlock()
-		if err := k.ensureActive(n); err != nil {
+		if err := k.ensureActive(n, nil); err != nil {
 			return zero, fmt.Errorf("loong: activate service node %q: %w", n.ID, err)
 		}
 		k.mu.Lock()
@@ -89,7 +89,7 @@ func (k *Kernel) lookup[T any](from *Node, id string) (T, error) {
 	}
 	k.mu.Unlock()
 
-	if err := k.ensureActive(target); err != nil {
+	if err := k.ensureActive(target, nil); err != nil {
 		return zero, fmt.Errorf("loong: activate service node %q: %w", target.ID, err)
 	}
 	k.mu.Lock()

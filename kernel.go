@@ -155,15 +155,17 @@ func (k *Kernel) registerService(n *Node) error {
 // lifecycle (Build + Run) outside any kernel-wide lock so component
 // code may itself call Get/GetFrom for other lazy services without
 // deadlocking. The per-node mutex serializes concurrent activations of
-// the same node and caches the outcome for later callers.
-func (k *Kernel) ensureActive(n *Node) error {
+// the same node and caches the outcome for later callers. args is
+// exposed to the component through Scope.Args (nil for startup and
+// service activation) — the value a parent passes via Scope.Activate.
+func (k *Kernel) ensureActive(n *Node, args any) error {
 	n.actMu.Lock()
 	defer n.actMu.Unlock()
 	if n.actDone {
 		return n.actErr
 	}
 	n.component = k.factories[n.Type].factory()
-	sc := &Scope{Kernel: k, Node: n, Raw: n.Config}
+	sc := &Scope{Kernel: k, Node: n, Raw: n.Config, Args: args}
 	if err := n.component.Build(sc); err != nil {
 		n.actDone, n.actErr = true, err
 		return err
@@ -191,7 +193,7 @@ func (k *Kernel) Activate(id string) error {
 	if n == nil {
 		return fmt.Errorf("loong: unknown node %q", id)
 	}
-	return k.ensureActive(n)
+	return k.ensureActive(n, nil)
 }
 
 // NodeInfo is the instance-level view of one mounted node, returned

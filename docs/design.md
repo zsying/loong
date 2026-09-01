@@ -192,12 +192,14 @@ children:
 
 ### 4.4 CLI 组件化（cli 模式）
 
-CLI 应用与常驻渠道共用同一心智：**父组件提供能力（服务），子组件消费**。`components/cli` 提供：
+CLI 应用与常驻渠道共用同一心智：**父组件定义其子节点的激活方式**（`Scope.Activate`），激活链全程是框架能力，无外部分发代码。`components/cli` 提供：
 
-- **cli 总控**（type `cli`，Eager）：从 os.Args 构建命令 `*cli.Context`（参数、输出流、退出码 + flag 解析辅助），以服务暴露给子命令；子命令 `ctx.Get[*cli.Context]()` 消费，不直接碰 os.Args。
-- **命令 = lazy 子组件**：`cli.list` / `cli.new` / `cli.tree` 及业务命令组件挂载在总控下，`main` 按命令路径 `Activate` 逐级激活执行。
-- **多级命令 = 树层级**：命令组是 `cli.group` 容器（`config` 下挂 `show` / `set`）；dispatch 沿路径激活，组被直接调用或叶命令被追加"子命令"均视为 usage 错误（退出码 2）；叶命令之后的参数交给命令自己（通过 Context）。
-- **一键入口**：包级 `cli.Go(yamlData)`——Parse 内联配置树 → Assemble → dispatch(os.Args) → Shutdown → 退出码；业务 CLI 的 main 只有两行（embed + `os.Exit(cli.Go(cliYAML))`）。
+- **父定义子激活（框架原语）**：`Scope.Activate(id string, args any)` —— 父节点激活自己的直接子节点，参数经子节点的 `Scope.Args` 注入；激活保持按节点幂等（参数首次激活生效）。这是通用能力，不限于 CLI（向导流程、状态机、插件选择皆可用）。
+- **cli 总控**（type `cli`，Eager）：`Run` 解析 os.Args，第一个参数是命令名——`ctx.Activate(args[0], args[1:])` 激活对应子命令并把剩余参数传下去；无参数或未知命令返回 `ErrUsage`（退出码 2）。
+- **命令 = lazy 子组件**：`cli.list` / `cli.new` / `cli.tree` 及业务命令组件挂载在总控下，`Run` 里读 `ctx.Args` 执行；`cli` 包提供 `HasFlag` / `Flag` / `Positional` 参数解析辅助。
+- **多级命令 = 树层级**：命令组是通用 `cli.group` 容器（`config` 下挂 `show` / `set`），其 `Run` 就是"把第一个参数当子命令 `Activate` 下去，剩余参数传递"——组组件零定制，任何层级复用同一类型；组被直接调用（无子命令）返回 `ErrUsage`。
+- **退出码**：成功 0；命令/装配错误 1；`ErrUsage` 2（`errors.Is` 判断）。命令在装配期执行（总控 Run 触发），`main` 只负责启动 + 错误映射 + `Shutdown`。
+- **一键入口**：包级 `cli.Go(yamlData)`——Parse 内联配置树 → Assemble（命令自动执行）→ Shutdown → 退出码；业务 CLI 的 main 只有两行（embed + `os.Exit(cli.Go(cliYAML))`）。配置树在文件里时用 `LoadAndRun` 同样可行。
 - 任何 loong 应用挂载这些组件即可获得组件化 CLI；`examples/cli` 是完整模板（总控 + 平台组件 + 业务命令 + 多级命令）。扩展命令 = 注册组件类型 + yaml 加 lazy 节点。
 
 ## 5. 渠道适配

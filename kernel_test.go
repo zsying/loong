@@ -708,6 +708,47 @@ func parseConfig(t *testing.T, yamlText string) yaml.Node {
 	return *doc.Content[0]
 }
 
+// argsSpy records the activation arguments it receives through
+// Scope.Args.
+type argsSpy struct {
+	Base
+	got any
+}
+
+func (s *argsSpy) Run(ctx *Scope) error { s.got = ctx.Args; return nil }
+
+// TestScopeActivate verifies the parent-defined activation primitive:
+// a parent activates one of its direct children with arguments, which
+// the child reads via Scope.Args; non-children are rejected.
+func TestScopeActivate(t *testing.T) {
+	RegisterComponent("test.argsspy", func() Component { return &argsSpy{} })
+	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	root := &Node{
+		Type: "test.spy", ID: "root",
+		Children: []*Node{
+			{Type: "test.argsspy", ID: "child", Lazy: true},
+		},
+	}
+	k := New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+
+	parent := scopeAt(k, "root")
+	if err := parent.Activate("child", "hello"); err != nil {
+		t.Fatalf("activate child: %v", err)
+	}
+	c := k.idIndex["child"].component.(*argsSpy)
+	if c.got != "hello" {
+		t.Errorf("child args = %v, want hello", c.got)
+	}
+
+	// A non-child id is rejected.
+	if err := scopeAt(k, "child").Activate("root", nil); err == nil {
+		t.Error("expected error when activating a non-child")
+	}
+}
+
 func TestScopeConfig(t *testing.T) {
 	// Decoding a well-formed block.
 	s := &Scope{Kernel: New(), Node: &Node{ID: "x"}, Raw: parseConfig(t, "name: hello\nport: 8080\n")}

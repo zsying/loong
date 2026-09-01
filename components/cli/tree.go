@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"errors"
 	"fmt"
 	"html"
 	"strings"
@@ -19,23 +18,20 @@ type Tree struct {
 }
 
 func (c *Tree) Run(ctx *loong.Scope) error {
-	cctx := ctx.Get[*Context]()
-	if cctx == nil {
-		return errors.New("cli: context not mounted (tree requires a cli master)")
-	}
-	pos := cctx.Positional()
+	args, _ := ctx.Args.([]string)
+	pos := Positional(args)
 	if len(pos) == 0 {
-		return fmt.Errorf("cli tree: missing config path (usage: loong tree <config.yaml>)")
+		return fmt.Errorf("cli tree: missing config path (usage: cli tree <config.yaml>)")
 	}
 	root, err := loong.LoadTree(pos[0])
 	if err != nil {
 		return err
 	}
 	meta := catalogIndex()
-	if cctx.HasFlag("html") {
-		fmt.Fprint(cctx.Out, renderTreeHTML(root, meta))
+	if HasFlag(args, "html") {
+		fmt.Print(renderTreeHTML(root, meta))
 	} else {
-		fmt.Fprint(cctx.Out, renderTree(root, meta))
+		fmt.Print(renderTree(root, meta))
 	}
 	return nil
 }

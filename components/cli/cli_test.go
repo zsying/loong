@@ -1,7 +1,8 @@
 package cli
 
 import (
-	"bytes"
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -10,50 +11,56 @@ import (
 	"github.com/zsying/loong"
 )
 
-func TestContextFlags(t *testing.T) {
-	c := NewContext([]string{"--html", "--o=out", "name", "-x"}, &bytes.Buffer{}, &bytes.Buffer{})
-	if !c.HasFlag("html") {
+func TestArgsHelpers(t *testing.T) {
+	args := []string{"--html", "--o=out", "name", "-x"}
+	if !HasFlag(args, "html") {
 		t.Error("HasFlag(html) = false")
 	}
-	if c.HasFlag("json") {
+	if HasFlag(args, "json") {
 		t.Error("HasFlag(json) = true")
 	}
-	if v, ok := c.Flag("o"); !ok || v != "out" {
+	if v, ok := Flag(args, "o"); !ok || v != "out" {
 		t.Errorf("Flag(o) = %q,%v", v, ok)
 	}
-	if v, ok := c.Flag("x"); ok {
+	if v, ok := Flag(args, "x"); ok {
 		t.Errorf("Flag(x) = %q, want absent", v)
 	}
-	pos := c.Positional()
+	pos := Positional(args)
 	if len(pos) != 1 || pos[0] != "name" {
 		t.Errorf("Positional = %v, want [name]", pos)
 	}
-	c.SetExit(3)
-	if c.ExitCode() != 3 {
-		t.Errorf("ExitCode = %d, want 3", c.ExitCode())
-	}
 }
 
-// test command components for dispatch.
-type testCmd struct {
+// gotArgs records the arguments a test command received, mirroring a
+// leaf command reading ctx.Args.
+type gotArgs struct {
+	loong.Base
+	got any
+}
+
+func (c *gotArgs) Run(ctx *loong.Scope) error {
+	c.got = ctx.Args
+	return nil
+}
+
+// quietRoot is a no-op parent for tests — the real cli master reads
+// os.Args in Run, which does not apply under go test.
+type quietRoot struct {
 	loong.Base
 }
 
-func (c *testCmd) Run(*loong.Scope) error { return nil }
-
-func regTestTree(t *testing.T) *loong.Kernel {
-	t.Helper()
-	loong.RegisterComponent("test.cmd", func() loong.Component { return &testCmd{} })
-	loong.RegisterComponent("test.group", func() loong.Component { return &testCmd{} })
-	// Root uses the real cli master registered by this package (eager),
-	// so dispatch can hand leaf arguments to its Context.
+// TestGroupActivation drives the group behavior: a cli.group node
+// receives ["show", "theme"], activates its "show" child and passes
+// the remaining arguments down. This is the parent-defined activation
+// chain — no dispatch code outside the components.
+func TestGroupActivation(t *testing.T) {
+	loong.RegisterComponent("test.show", func() loong.Component { return &gotArgs{} })
+	loong.RegisterComponent("test.parent", func() loong.Component { return &quietRoot{} })
 	root := &loong.Node{
-		Type: "cli", ID: "root",
+		Type: "test.parent", ID: "root",
 		Children: []*loong.Node{
-			{Type: "test.cmd", ID: "list", Lazy: true},
-			{Type: "test.group", ID: "config", Lazy: true, Children: []*loong.Node{
-				{Type: "test.cmd", ID: "show", Lazy: true},
-				{Type: "test.cmd", ID: "set", Lazy: true},
+			{Type: "cli.group", ID: "config", Lazy: true, Children: []*loong.Node{
+				{Type: "test.show", ID: "show", Lazy: true},
 			}},
 		},
 	}
@@ -61,46 +68,24 @@ func regTestTree(t *testing.T) *loong.Kernel {
 	if err := k.Assemble(root); err != nil {
 		t.Fatal(err)
 	}
-	return k
-}
 
-func TestDispatch(t *testing.T) {
-	k := regTestTree(t)
-
-	// Leaf command.
-	if code := Dispatch(k, []string{"list"}); code != 0 {
-		t.Errorf("dispatch(list) = %d, want 0", code)
+	config := root.Children[0]
+	g := &Group{}
+	if err := g.Run(&loong.Scope{Kernel: k, Node: config, Args: []string{"show", "theme"}}); err != nil {
+		t.Fatalf("group run: %v", err)
 	}
-	// Arguments after the leaf command are injected into Context.
-	if code := Dispatch(k, []string{"list", "--html"}); code != 0 {
-		t.Errorf("dispatch(list --html) = %d, want 0", code)
-	}
-	master, err := k.Component("root")
+	show, err := k.Component("show")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := master.(*Component).Ctx.Args; len(got) != 1 || got[0] != "--html" {
-		t.Errorf("leaf args injected = %v, want [--html]", got)
+	if got := show.(*gotArgs).got; !reflect.DeepEqual(got, []string{"theme"}) {
+		t.Errorf("leaf args = %v, want [theme]", got)
 	}
-	// Multi-level command path.
-	if code := Dispatch(k, []string{"config", "show"}); code != 0 {
-		t.Errorf("dispatch(config show) = %d, want 0", code)
-	}
-	// Group invoked directly -> usage error.
-	if code := Dispatch(k, []string{"config"}); code != 2 {
-		t.Errorf("dispatch(config) = %d, want 2", code)
-	}
-	// Unknown command.
-	if code := Dispatch(k, []string{"nope"}); code != 1 {
-		t.Errorf("dispatch(nope) = %d, want 1", code)
-	}
-	// Arguments after a leaf command are the command's own (legal).
-	if code := Dispatch(k, []string{"list", "extra"}); code != 0 {
-		t.Errorf("dispatch(list extra) = %d, want 0 (extra is a command argument)", code)
-	}
-	// No arguments -> usage.
-	if code := Dispatch(k, nil); code != 2 {
-		t.Errorf("dispatch() = %d, want 2", code)
+
+	// A group invoked without a subcommand is a usage error.
+	err = g.Run(&loong.Scope{Kernel: k, Node: config})
+	if !errors.Is(err, ErrUsage) {
+		t.Errorf("empty group = %v, want ErrUsage", err)
 	}
 }
 
@@ -186,22 +171,33 @@ func TestScaffoldComponent(t *testing.T) {
 }
 
 func TestNodeQuery(t *testing.T) {
-	k := regTestTree(t)
+	root := &loong.Node{
+		Type: "test.parent", ID: "root",
+		Children: []*loong.Node{
+			{Type: "cli.group", ID: "config", Lazy: true, Children: []*loong.Node{
+				{Type: "test.show", ID: "show", Lazy: true},
+			}},
+		},
+	}
+	k := loong.New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
 	info, err := k.Node("config")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.ID != "config" || info.Type != "test.group" || !info.Lazy {
+	if info.ID != "config" || info.Type != "cli.group" || !info.Lazy {
 		t.Errorf("info = %+v", info)
 	}
-	if len(info.Children) != 2 || info.Children[0].ID != "show" {
-		t.Errorf("children = %+v, want [show set]", info.Children)
+	if len(info.Children) != 1 || info.Children[0].ID != "show" {
+		t.Errorf("children = %+v, want [show]", info.Children)
 	}
 	if _, err := k.Node("missing"); err == nil {
 		t.Error("expected error for unknown node")
 	}
-	root, err := k.Root()
-	if err != nil || root.ID != "root" {
-		t.Errorf("Root = %+v, err %v", root, err)
+	rootInfo, err := k.Root()
+	if err != nil || rootInfo.ID != "root" {
+		t.Errorf("Root = %+v, err %v", rootInfo, err)
 	}
 }
