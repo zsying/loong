@@ -28,7 +28,12 @@ type Component struct {
 }
 
 func (c *Component) Build(scope *loong.Scope) error {
-	c.Ctx = NewContext(os.Args[1:], os.Stdout, os.Stderr)
+	// The first argument is the command name, which the subcommand does
+	// not need — it knows its own identity. Skipping it keeps the plain
+	// standard-API path (Assemble + Activate) working with the same
+	// Context semantics as cli.Go, whose dispatch overwrites the args
+	// with the leaf command's own arguments anyway.
+	c.Ctx = NewContext(os.Args[2:], os.Stdout, os.Stderr)
 	return nil
 }
 

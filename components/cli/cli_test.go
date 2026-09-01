@@ -71,6 +71,17 @@ func TestDispatch(t *testing.T) {
 	if code := dispatch(k, []string{"list"}); code != 0 {
 		t.Errorf("dispatch(list) = %d, want 0", code)
 	}
+	// Arguments after the leaf command are injected into Context.
+	if code := dispatch(k, []string{"list", "--html"}); code != 0 {
+		t.Errorf("dispatch(list --html) = %d, want 0", code)
+	}
+	master, err := k.Component("root")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := master.(*Component).Ctx.Args; len(got) != 1 || got[0] != "--html" {
+		t.Errorf("leaf args injected = %v, want [--html]", got)
+	}
 	// Multi-level command path.
 	if code := dispatch(k, []string{"config", "show"}); code != 0 {
 		t.Errorf("dispatch(config show) = %d, want 0", code)
