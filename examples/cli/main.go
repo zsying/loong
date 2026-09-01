@@ -16,6 +16,7 @@ package main
 import (
 	_ "embed"
 	"errors"
+	"fmt"
 	"log"
 	"os"
 
@@ -58,8 +59,11 @@ func main() {
 
 // exitCode maps an error to a process exit code — an application-level
 // choice: usage errors (cli.ErrUsage) are 2, everything else is 1.
+// Every error is printed before exiting — usage errors must never
+// exit silently.
 func exitCode(err error) int {
 	if errors.Is(err, cli.ErrUsage) {
+		fmt.Fprintln(os.Stderr, err) // e.g. "cli config" without a subcommand
 		return 2
 	}
 	log.Print(err)
