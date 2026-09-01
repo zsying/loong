@@ -117,6 +117,7 @@ type ComponentMeta struct {
 	Type         string        // type name used in the config tree
 	Desc         string        // WithDesc description
 	Service      bool          // exposes at least one service
+	ServiceTypes []string      // declared service types, e.g. ["*user.Service"]
 	Eager        bool          // activated at assembly (service components are lazy by default)
 	Emits        []string      // event names declared via WithEvents
 	ConfigType   string        // declared config struct name (WithConfig)
@@ -132,16 +133,22 @@ type ConfigField struct {
 
 // Components returns metadata for every init()-registered component
 // type. It is the discovery entry point for using loong at scale:
-// pick a type name for the config tree, inspect its config keys, then
-// go doc the exported service types for their interfaces.
+// pick a type name for the config tree, inspect its config keys and
+// services, then go doc the exported service types for their
+// interfaces.
 func Components() []ComponentMeta {
 	out := make([]ComponentMeta, 0, len(factories))
 	for name, e := range factories {
 		cfgType, cfgFields := describeConfig(e.configType)
+		svcTypes := make([]string, 0, len(e.services))
+		for _, sd := range e.services {
+			svcTypes = append(svcTypes, sd.typ.String())
+		}
 		out = append(out, ComponentMeta{
 			Type:         name,
 			Desc:         e.desc,
 			Service:      len(e.services) > 0,
+			ServiceTypes: svcTypes,
 			Eager:        e.eager,
 			Emits:        e.emits,
 			ConfigType:   cfgType,

@@ -40,12 +40,8 @@ func renderListText(infos []loong.ComponentMeta) string {
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Type < sorted[j].Type })
 	var b strings.Builder
 	tw := tabwriter.NewWriter(&b, 2, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "TYPE\tSERVICE\tMODE\tCONFIG KEYS\tDESC")
+	fmt.Fprintln(tw, "TYPE\tSERVICE\tMODE\tCONFIG KEYS\tEVENTS\tDESC")
 	for _, m := range sorted {
-		svc := "-"
-		if m.Service {
-			svc = "service"
-		}
 		mode := "-"
 		if m.Service {
 			if m.Eager {
@@ -54,7 +50,8 @@ func renderListText(infos []loong.ComponentMeta) string {
 				mode = "lazy"
 			}
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", m.Type, svc, mode, configKeys(m), m.Desc)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\n", m.Type, joinOrDash(m.ServiceTypes),
+			mode, configKeys(m), strings.Join(m.Emits, ", "), m.Desc)
 	}
 	_ = tw.Flush()
 	return b.String()
@@ -68,7 +65,7 @@ func renderListHTML(infos []loong.ComponentMeta) string {
 	var b strings.Builder
 	b.WriteString("<!doctype html><html><head><meta charset=\"utf-8\"><title>loong components</title></head><body>")
 	b.WriteString("<h1>loong components</h1><table border=\"1\" cellpadding=\"4\" cellspacing=\"0\">")
-	b.WriteString("<tr><th>type</th><th>service</th><th>mode</th><th>config keys</th><th>desc</th></tr>")
+	b.WriteString("<tr><th>type</th><th>service</th><th>mode</th><th>config keys</th><th>events</th><th>desc</th></tr>")
 	for _, m := range sorted {
 		mode := "-"
 		if m.Service {
@@ -78,11 +75,20 @@ func renderListHTML(infos []loong.ComponentMeta) string {
 				mode = "lazy"
 			}
 		}
-		fmt.Fprintf(&b, "<tr><td>%s</td><td>%v</td><td>%s</td><td>%s</td><td>%s</td></tr>",
-			html.EscapeString(m.Type), m.Service, mode, configKeys(m), html.EscapeString(m.Desc))
+		fmt.Fprintf(&b, "<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>",
+			html.EscapeString(m.Type), html.EscapeString(joinOrDash(m.ServiceTypes)), mode,
+			configKeys(m), html.EscapeString(strings.Join(m.Emits, ", ")), html.EscapeString(m.Desc))
 	}
 	b.WriteString("</table></body></html>")
 	return b.String()
+}
+
+// joinOrDash joins items, or "-" when empty.
+func joinOrDash(items []string) string {
+	if len(items) == 0 {
+		return "-"
+	}
+	return strings.Join(items, ", ")
 }
 
 // configKeys joins a component's declared config keys, marking

@@ -20,7 +20,7 @@ func cfgNode(t *testing.T, s string) yaml.Node {
 
 func TestRenderListTextSorted(t *testing.T) {
 	infos := []loong.ComponentMeta{
-		{Type: "web", Service: true, Eager: true},
+		{Type: "web", Service: true, ServiceTypes: []string{"*web.Router"}, Eager: true, Emits: []string{"biz.*"}},
 		{Type: "app"},
 		{Type: "log", ConfigFields: []loong.ConfigField{{Name: "level", Type: "string"}}},
 	}
@@ -33,16 +33,18 @@ func TestRenderListTextSorted(t *testing.T) {
 	if appAt < 0 || webAt < 0 || appAt > webAt {
 		t.Fatalf("rows not sorted by type:\n%s", out)
 	}
-	if !strings.Contains(out, "eager") || !strings.Contains(out, "level") {
-		t.Fatalf("missing annotation or config keys:\n%s", out)
+	for _, want := range []string{"eager", "level", "*web.Router", "biz.*"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("missing %q:\n%s", want, out)
+		}
 	}
 }
 
 func TestRenderListHTML(t *testing.T) {
 	out := renderListHTML([]loong.ComponentMeta{
-		{Type: "web", Service: true, Eager: true, Desc: "a <b>web</b>"},
+		{Type: "web", Service: true, ServiceTypes: []string{"*web.Router"}, Eager: true, Desc: "a <b>web</b>"},
 	})
-	for _, want := range []string{"<!doctype html>", "<table", "<td>web</td>", "eager", "&lt;b&gt;web&lt;/b&gt;"} {
+	for _, want := range []string{"<!doctype html>", "<table", "<td>web</td>", "eager", "*web.Router", "&lt;b&gt;web&lt;/b&gt;"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("html missing %q:\n%s", want, out)
 		}

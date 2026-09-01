@@ -669,6 +669,9 @@ func TestComponentsCatalog(t *testing.T) {
 	if !found.Service || found.Eager {
 		t.Errorf("meta = %+v, want Service=true Eager=false", found)
 	}
+	if len(found.ServiceTypes) != 1 || found.ServiceTypes[0] != "*loong.catSvc" {
+		t.Errorf("service types = %v, want [*loong.catSvc]", found.ServiceTypes)
+	}
 	if len(found.Emits) != 2 || found.Emits[1] != "test.*" {
 		t.Errorf("emits = %v, want [test.one test.*]", found.Emits)
 	}
