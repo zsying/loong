@@ -1,7 +1,8 @@
 # CLI 演示：loong 组件树驱动的命令行应用。
-# cli 总控（Eager）解析命令行并激活命令；命令节点 lazy 按需激活；
-# config 组演示多级命令；log 提供平台日志（命令执行/错误都可记录）。
-type: cli
+# 根用内置 base 容器；cli 总控作为普通子组件（默认装配激活）解析
+# 命令行并激活命令；命令节点 lazy 按需激活；config 组演示多级命令；
+# log 提供平台日志（命令执行/错误都可记录）。
+type: base
 config:
   name: demo-cli
 children:
@@ -10,25 +11,27 @@ children:
     config:
       level: debug
       format: console
-  - type: cli.list
-    id: list
-    lazy: true
-  - type: cli.new
-    id: new
-    lazy: true
-  - type: cli.tree
-    id: tree
-    lazy: true
-  - type: cli.group
-    id: config
-    lazy: true
+  - type: cli
     children:
-      - type: demo.config.show
-        id: show
+      - type: cli.list
+        id: list
         lazy: true
-      - type: demo.config.set
-        id: set
+      - type: cli.new
+        id: new
         lazy: true
-  - type: demo.greet
-    id: greet
-    lazy: true
+      - type: cli.tree
+        id: tree
+        lazy: true
+      - type: cli.group
+        id: config
+        lazy: true
+        children:
+          - type: demo.config.show
+            id: show
+            lazy: true
+          - type: demo.config.set
+            id: set
+            lazy: true
+      - type: demo.greet
+        id: greet
+        lazy: true

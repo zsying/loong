@@ -55,7 +55,7 @@ func (k *Kernel) Assemble(root *Node) error {
 	}
 	var built []*Node
 	if err := k.walk(root, func(n *Node) error {
-		if k.lazyByDefault(n) {
+		if n.Lazy {
 			return nil
 		}
 		if err := k.buildNode(n); err != nil {
@@ -67,7 +67,7 @@ func (k *Kernel) Assemble(root *Node) error {
 		return err
 	}
 	return k.walk(root, func(n *Node) error {
-		if k.lazyByDefault(n) {
+		if n.Lazy {
 			return nil
 		}
 		if err := n.component.Run(&Scope{Kernel: k, Node: n}); err != nil {
@@ -75,14 +75,6 @@ func (k *Kernel) Assemble(root *Node) error {
 		}
 		return nil
 	})
-}
-
-// lazyByDefault reports whether a node is skipped during assembly and
-// activated on demand instead: exactly the nodes marked lazy in the
-// config tree. Every other node — service components included — is
-// activated at assembly; activation is one rule, declared per node.
-func (k *Kernel) lazyByDefault(n *Node) bool {
-	return n.Lazy
 }
 
 // indexNode walks the tree, filling default ids, setting parent

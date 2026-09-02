@@ -20,8 +20,9 @@ import (
 	"github.com/zsying/loong"
 )
 
-// ErrUsage marks a command-line usage error (unknown or incomplete
-// invocation); callers map it to an exit code (2 in examples/cli).
+// ErrUsage marks an incomplete invocation — a command group reached
+// without a subcommand. Callers map it to an exit code (2 in
+// examples/cli); an unknown command is a plain activation error.
 var ErrUsage = errors.New("cli: usage error")
 
 // Component is the cli master: it parses os.Args and activates the
@@ -45,11 +46,14 @@ func init() {
 	)
 }
 
-// usage prints the command tree under the master and returns ErrUsage.
+// usage prints the command tree under the master and returns nil:
+// invoking the CLI without a command is a help request, not an error
+// (the process exits 0). Only an incomplete invocation — e.g. a
+// cli.group reached without a subcommand — reports ErrUsage.
 func usage(ctx *loong.Scope) error {
 	fmt.Println("usage: <command>")
 	printCommands(ctx.Node.Children, 1)
-	return ErrUsage
+	return nil
 }
 
 // printCommands renders a node's children with indentation, marking
