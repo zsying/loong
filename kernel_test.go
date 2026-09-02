@@ -262,8 +262,8 @@ func scopeAt(k *Kernel, id string) *Scope {
 // svcValue is a service value exposed by svcProvider.
 type svcValue struct{ n int }
 
-// svcProvider is a lazy service component: it declares *svcValue via
-// WithService and is activated on first lookup.
+// svcProvider declares a service; like any component it activates at
+// assembly unless its node is marked lazy in the config tree.
 type svcProvider struct {
 	Base
 	v *svcValue
@@ -278,6 +278,8 @@ func TestServiceLazyActivation(t *testing.T) {
 	RegisterComponent("test.svc", func() Component { return &svcProvider{} },
 		WithService(func(c Component) *svcValue { return c.(*svcProvider).v }))
 	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+
+	// A service component without a lazy marker activates at assembly.
 	root := &Node{
 		Type: "test.spy", ID: "root",
 		Children: []*Node{{Type: "test.svc", ID: "users"}},
@@ -286,26 +288,38 @@ func TestServiceLazyActivation(t *testing.T) {
 	if err := k.Assemble(root); err != nil {
 		t.Fatal(err)
 	}
-	// The service node must stay inactive after assembly: no instance,
-	// so no SQLite open / network connect happens at startup.
-	if n := k.idIndex["users"]; n.component != nil {
-		t.Fatal("service node should not be activated during assembly")
+	if n := k.idIndex["users"]; n.component == nil {
+		t.Fatal("service components activate during assembly by default")
+	}
+
+	// Laziness is declared per node in the config tree (lazy: true):
+	// no instance exists until the first lookup.
+	root2 := &Node{
+		Type: "test.spy", ID: "root2",
+		Children: []*Node{{Type: "test.svc", ID: "users2", Lazy: true}},
+	}
+	k2 := New()
+	if err := k2.Assemble(root2); err != nil {
+		t.Fatal(err)
+	}
+	if n := k2.idIndex["users2"]; n.component != nil {
+		t.Fatal("lazy service node should not be activated during assembly")
 	}
 	// First Get activates the node on demand and returns its value.
-	if v := scopeAt(k, "users").Get[*svcValue](); v == nil || v.n != 42 {
+	if v := scopeAt(k2, "users2").Get[*svcValue](); v == nil || v.n != 42 {
 		t.Fatalf("Get[*svcValue]() = %+v, want &{n:42}", v)
 	}
-	if n := k.idIndex["users"]; n.component == nil {
-		t.Fatal("service node should be activated by Get")
+	if n := k2.idIndex["users2"]; n.component == nil {
+		t.Fatal("lazy service node should be activated by Get")
 	}
 	// Subsequent gets hit the cache; no double activation.
-	s := scopeAt(k, "users")
+	s := scopeAt(k2, "users2")
 	v1 := s.Get[*svcValue]()
 	v2 := s.Get[*svcValue]()
 	if v1 != v2 {
 		t.Fatal("service should be a singleton across Get calls")
 	}
-	if err := k.Shutdown(); err != nil {
+	if err := k2.Shutdown(); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -401,15 +415,28 @@ func TestNilService(t *testing.T) {
 	RegisterComponent("test.nil", func() Component { return &nilProvider{} },
 		WithService(func(c Component) *nilSvc { return nil }))
 	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+
+	// A service component activates during assembly, so a nil accessor
+	// surfaces at startup.
 	root := &Node{
 		Type: "test.spy", ID: "root",
 		Children: []*Node{{Type: "test.nil", ID: "n"}},
 	}
 	k := New()
-	if err := k.Assemble(root); err != nil {
-		t.Fatal(err)
+	if err := k.Assemble(root); err == nil {
+		t.Fatal("expected assembly error when a service accessor returns nil")
 	}
-	if _, err := scopeAt(k, "root").TryGet[*nilSvc](); err == nil {
+
+	// Marked lazy, the check defers to the first lookup.
+	root2 := &Node{
+		Type: "test.spy", ID: "root2",
+		Children: []*Node{{Type: "test.nil", ID: "n2", Lazy: true}},
+	}
+	k2 := New()
+	if err := k2.Assemble(root2); err != nil {
+		t.Fatalf("lazy nil provider should assemble: %v", err)
+	}
+	if _, err := scopeAt(k2, "root2").TryGet[*nilSvc](); err == nil {
 		t.Fatal("expected error when a service accessor returns nil")
 	}
 }
@@ -512,7 +539,7 @@ func TestServiceConcurrentActivation(t *testing.T) {
 type routerVal struct{ tag string }
 
 // routerProv models a startup channel like web: it declares a service
-// and is registered with Eager() so it activates during assembly.
+// and, like any non-lazy node, activates during assembly.
 type routerProv struct {
 	Base
 	v *routerVal
@@ -537,8 +564,7 @@ func (u *routerUser) Build(ctx *Scope) error {
 
 func regWebPair() {
 	RegisterComponent("test.web", func() Component { return &routerProv{} },
-		WithService(func(c Component) *routerVal { return c.(*routerProv).v }),
-		Eager())
+		WithService(func(c Component) *routerVal { return c.(*routerProv).v }))
 	RegisterComponent("test.ruser", func() Component { return &routerUser{} })
 }
 
@@ -691,8 +717,8 @@ func TestComponentsCatalog(t *testing.T) {
 	if found == nil {
 		t.Fatal("test.cat not listed in Components()")
 	}
-	if !found.Service || found.Eager {
-		t.Errorf("meta = %+v, want Service=true Eager=false", found)
+	if !found.Service {
+		t.Errorf("meta = %+v, want Service=true", found)
 	}
 	if len(found.ServiceTypes) != 1 || found.ServiceTypes[0] != "*loong.catSvc" {
 		t.Errorf("service types = %v, want [*loong.catSvc]", found.ServiceTypes)

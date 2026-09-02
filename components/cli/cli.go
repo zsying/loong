@@ -1,14 +1,14 @@
 // Package cli provides the CLI building blocks for loong applications.
 // It follows the same pattern as the web channel: a cli master
-// component (type "cli", eager) parses the command line and activates
-// the matching child command, and subcommand components (cli.list,
-// cli.new, ...) mount under it as lazy nodes. The activation chain is
-// pure framework — every level calls scope.Activate(child, args),
-// passing arguments through scope.Args — so no dispatch logic lives
-// outside the components. Any loong application can mount these
-// components and get a component-driven CLI; see examples/cli for the
-// complete template (embedded or file-based config tree, any entry
-// style).
+// component (type "cli", activated at assembly like any non-lazy
+// node) parses the command line and activates the matching child
+// command, and subcommand components (cli.list, cli.new, ...) mount
+// under it as lazy nodes. The activation chain is pure framework —
+// every level calls scope.Activate(child, args), passing arguments
+// through scope.Args — so no dispatch logic lives outside the
+// components. Any loong application can mount these components and
+// get a component-driven CLI; see examples/cli for the complete
+// template (embedded or file-based config tree, any entry style).
 package cli
 
 import (
@@ -41,7 +41,6 @@ func (c *Component) Run(ctx *loong.Scope) error {
 
 func init() {
 	loong.RegisterComponent("cli", func() loong.Component { return &Component{} },
-		loong.Eager(), // master runs at assembly so the command fires
 		loong.WithDesc("CLI master: parses the command line and activates the command"),
 	)
 }

@@ -4,6 +4,7 @@
 *.db-wal
 *.exe
 *.out
+*.log
 
 # Project-local data (kept out of the repository)
 .workbuddy/

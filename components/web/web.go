@@ -181,7 +181,6 @@ func init() {
 	loong.RegisterComponent("web", func() loong.Component { return &Web{} },
 		loong.WithConfig[Config](),
 		loong.WithService(func(c loong.Component) *Router { return &Router{mux: c.(*Web).mux} }),
-		loong.Eager(), // a startup channel: run at assembly, not lazily
 		loong.WithDesc("web channel: stdlib HTTP + JWT auth, exposes Router"),
 	)
 }

@@ -40,15 +40,14 @@ func New() *Kernel {
 
 // Assemble registers the tree and activates every non-lazy node in two
 // phases: Build (instantiate + wire, parent before child) then Run
-// (start serving, parent before child). Nodes that are marked lazy in
-// the config tree, or that are service components without Eager(), are
-// registered only and activated on demand through Scope.Get/GetFrom or
-// Kernel.Activate. If Build or Run fails, nodes already built are
-// stopped in reverse order so acquired resources (db connections,
-// servers) are released.
+// (start serving, parent before child). A node marked lazy in the
+// config tree is registered only and activated on demand through
+// Scope.Activate, Scope.Get/GetFrom or Kernel.Activate. If Build or
+// Run fails, nodes already built are stopped in reverse order so
+// acquired resources (db connections, servers) are released.
 func (k *Kernel) Assemble(root *Node) error {
 	k.root = root
-	if err := k.register(root, nil); err != nil {
+	if err := k.indexNode(root, nil); err != nil {
 		return err
 	}
 	if err := k.checkUniqueIDs(root); err != nil {
@@ -79,18 +78,18 @@ func (k *Kernel) Assemble(root *Node) error {
 }
 
 // lazyByDefault reports whether a node is skipped during assembly and
-// activated on demand instead: explicitly marked lazy in the config
-// tree, or a service component that was not registered with Eager().
+// activated on demand instead: exactly the nodes marked lazy in the
+// config tree. Every other node — service components included — is
+// activated at assembly; activation is one rule, declared per node.
 func (k *Kernel) lazyByDefault(n *Node) bool {
-	e := k.factories[n.Type]
-	return n.Lazy || (len(e.services) > 0 && !e.eager)
+	return n.Lazy
 }
 
-// register walks the tree, filling default ids, setting parent
+// indexNode walks the tree, filling default ids, setting parent
 // pointers, validating component types and building the by-type /
 // by-id indexes. Nothing is instantiated here — this phase is cheap
 // and always runs fully.
-func (k *Kernel) register(n *Node, parent *Node) error {
+func (k *Kernel) indexNode(n *Node, parent *Node) error {
 	n.parent = parent
 	if n.ID == "" {
 		n.ID = n.Type
@@ -101,7 +100,7 @@ func (k *Kernel) register(n *Node, parent *Node) error {
 	k.nodesByType[n.Type] = append(k.nodesByType[n.Type], n)
 	k.idIndex[n.ID] = n
 	for _, c := range n.Children {
-		if err := k.register(c, n); err != nil {
+		if err := k.indexNode(c, n); err != nil {
 			return err
 		}
 	}

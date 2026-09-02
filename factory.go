@@ -14,13 +14,11 @@ type serviceDecl struct {
 }
 
 // regEntry describes one registered component type: its factory plus
-// optional registration semantics (services, activation mode, events,
-// description).
+// optional registration semantics (services, events, description).
 type regEntry struct {
 	factory    func() Component
 	services   []serviceDecl // services declared via WithService (may be several)
 	configType reflect.Type  // config struct declared via WithConfig
-	eager      bool          // activated at assembly instead of lazily (Eager)
 	emits      []string      // event names this component emits (WithEvents)
 	desc       string        // human description for the component catalog (WithDesc)
 }
@@ -45,11 +43,11 @@ type ComponentOption func(*regEntry)
 //	)
 //
 // A component may declare several services (one WithService each).
-// Service components are activated lazily by default — their node is
-// instantiated, built and run on the first lookup — unless Eager()
-// marks them for startup activation. The accessor's return type is
-// checked at compile time by the generic parameter, so no runtime type
-// assertion is needed.
+// Activation is orthogonal: like any component, a service component is
+// activated at assembly unless its node is marked lazy in the config
+// tree, in which case the first lookup (Get/GetFrom) activates it on
+// demand. The accessor's return type is checked at compile time by the
+// generic parameter, so no runtime type assertion is needed.
 func WithService[T any](get func(Component) T) ComponentOption {
 	return func(e *regEntry) {
 		e.services = append(e.services, serviceDecl{
@@ -57,14 +55,6 @@ func WithService[T any](get func(Component) T) ComponentOption {
 			get: func(c Component) any { return get(c) },
 		})
 	}
-}
-
-// Eager marks the component type for startup activation, overriding
-// the default lazy activation of service components. Use it for
-// channels and other components that must be running as soon as the
-// tree is assembled even though they expose a service (e.g. web).
-func Eager() ComponentOption {
-	return func(e *regEntry) { e.eager = true }
 }
 
 // WithConfig declares the config struct this component type accepts.
@@ -94,8 +84,8 @@ func WithDesc(desc string) ComponentOption {
 // RegisterComponent declares a component type factory. Components call
 // this from their init() so the kernel can instantiate them by type
 // name found in the config tree. Optional ComponentOptions declare
-// services (WithService), activation mode (Eager), emitted events
-// (WithEvents) and a description (WithDesc).
+// services (WithService), the config struct (WithConfig), emitted
+// events (WithEvents) and a description (WithDesc).
 func RegisterComponent(typeName string, factory func() Component, opts ...ComponentOption) {
 	e := regEntry{factory: factory}
 	for _, o := range opts {
@@ -118,7 +108,6 @@ type ComponentMeta struct {
 	Desc         string        // WithDesc description
 	Service      bool          // exposes at least one service
 	ServiceTypes []string      // declared service types, e.g. ["*user.Service"]
-	Eager        bool          // activated at assembly (service components are lazy by default)
 	Emits        []string      // event names declared via WithEvents
 	ConfigType   string        // declared config struct name (WithConfig)
 	ConfigFields []ConfigField // config keys with types and optionality
@@ -149,7 +138,6 @@ func Components() []ComponentMeta {
 			Desc:         e.desc,
 			Service:      len(e.services) > 0,
 			ServiceTypes: svcTypes,
-			Eager:        e.eager,
 			Emits:        e.emits,
 			ConfigType:   cfgType,
 			ConfigFields: cfgFields,

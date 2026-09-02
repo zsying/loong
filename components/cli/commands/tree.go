@@ -60,14 +60,8 @@ func nodeLabel(n *loong.Node, meta map[string]loong.ComponentMeta) string {
 		label += " (" + n.ID + ")"
 	}
 	var annos []string
-	if m, ok := meta[n.Type]; ok {
-		if m.Service {
-			if m.Eager {
-				annos = append(annos, "service · eager")
-			} else {
-				annos = append(annos, "service · lazy")
-			}
-		}
+	if m, ok := meta[n.Type]; ok && m.Service {
+		annos = append(annos, "service")
 	}
 	if n.Lazy {
 		annos = append(annos, "lazy")

@@ -53,7 +53,7 @@
 | 组件 config | `WithConfig[T]` 声明结构（`Components()` 展示字段）；`scope.Config[T]()` 严格解码（未知字段报错） |
 | 事件协议 | `{Name, Source, Payload}`，直达直接父节点，`On(name, handler)` 订阅 |
 | 服务查找 | `Scope.Get[T]()` 树优先级（唯一提供者或父链最近；歧义提示 `GetFrom[T](id)`），Go 类型即 key |
-| 服务组件 | 注册选项 `WithService[T](get)`（可多个）+ `Eager()`；默认惰性、多实例并存 |
+| 服务组件 | 注册选项 `WithService[T](get)`（可多个）；激活规则与普通组件一致（默认装配激活 / yaml `lazy: true` 按需），多实例并存 |
 | 组件上下文 | `loong.Scope`（刻意避开标准库 `context.Context` 同名冲突） |
 | 日志 | 标准库 log/slog，console（彩色）/ json 双格式、级别可配 |
 | 用户存储 | modernc.org/sqlite（纯 Go，无 cgo） |
@@ -127,8 +127,8 @@ Application Root
 ### 4.2 组件组装（静态声明 + 动态注册）
 
 - **配置树**声明结构：谁挂在哪、父给什么配置。
-- **init() 自注册**声明类型：组件类型自己向内核注册；注册选项声明服务（`WithService[T](get)`，可多个）、激活模式（`Eager()`）、发出的事件（`WithEvents`）与描述（`WithDesc`）。
-- **装配器**流程（登记 / 激活两阶段）：读配置树 → 登记（类型校验、id 填充与查重、建索引——零实例化）→ 激活必需节点（非 lazy 节点按 build / run 两阶段启动，先父后子）→ 运行期按需激活 lazy / service 节点；Shutdown 对已激活节点按 Run 的逆序调 Stop，未激活节点跳过。
+- **init() 自注册**声明类型：组件类型自己向内核注册；注册选项声明服务（`WithService[T](get)`，可多个）、配置结构（`WithConfig[T]`）、发出的事件（`WithEvents`）与描述（`WithDesc`）。
+- **装配器**流程（登记 / 激活两阶段）：读配置树 → 登记（类型校验、id 填充与查重、建索引——零实例化）→ 激活必需节点（非 lazy 节点按 build / run 两阶段启动，先父后子）→ 运行期按需激活 yaml `lazy: true` 节点；Shutdown 对已激活节点按 Run 的逆序调 Stop，未激活节点跳过。
 - **一键启动**：`loong.LoadAndRun(path, loong.WithWait())` 合并“读配置树 → 登记 → 激活 → 运行”，`WithWait` 时阻塞到 SIGINT/SIGTERM 再优雅关闭；底层 `LoadTree` / `New` / `Assemble` 仍可直接调用（测试、嵌入式场景）。
 - **Base 骨架**：loong 包提供可嵌入的 Base（空默认三方法 + Scope + Emit / Logger），组件嵌入后只需覆盖关心的阶段——核心接口保持最小，复杂度按需覆盖。
 - 运行期支持动态启用 / 禁用 / 替换实例。
@@ -141,7 +141,7 @@ Application Root
 | Run | Build 成功后（先父后子） | 启动服务（先接线后点火） |
 | Stop | Shutdown 时按 Run 逆序（子先父后） | 优雅关闭（关 server / db / flush） |
 
-**惰性与按需激活**：配置树节点可用 `lazy: true` 声明延迟加载；声明了服务（`WithService`）且未标 `Eager()` 的组件默认惰性。登记阶段只校验与建索引，不实例化；惰性节点在首次 `Get[T]()`（service）或 `Kernel.Activate(id)` 时被激活。装配期激活保持"先全树 Build 再全树 Run"；惰性路径是"实例化 + Build + Run 一体"，依赖 DAG 由 Build 期的 Get 推导（父组件 Build 时 Get 懒服务 → 先激活服务再继续），天然"先依赖后依赖方"，同时消除了对配置树声明顺序的依赖。激活由内核互斥保证单例幂等。
+**惰性与按需激活**：激活只有一条规则——**默认装配激活，yaml `lazy: true` 显式跳过**，组件是否提供服务不改变它。登记阶段只校验与建索引，不实例化；lazy 节点在首次 `Get[T]()`（service）或 `Scope.Activate` / `Kernel.Activate(id)` 时被激活。装配期激活保持"先全树 Build 再全树 Run"；lazy 路径是"实例化 + Build + Run 一体"，依赖 DAG 由 Build 期的 Get 推导（父组件 Build 时 Get 懒服务 → 先激活服务再继续），天然"先依赖后依赖方"，同时消除了对配置树声明顺序的依赖。激活由内核互斥保证单例幂等。
 
 **配置树设计（YAML · 两段式解析）**：
 
@@ -186,7 +186,7 @@ children:
 - **多实例机制**：配置树里声明多个同 type 节点即可（id 唯一，缺省 id = type）；init() 注册的类型工厂每次调用返回**新实例**，各实例的 config / 事件 / 生命周期完全独立。
 - 实例配置 = 父链默认值 + 父节点覆盖 + 实例自身声明。
 - 例：用户体系在 Web 下表现为会话登录，在小程序下表现为 openid 登录；日志在 API 下输出 JSON、在 TUI 下输出 ANSI 彩色——组件本身不改，读父链下发的配置 / 角色决定行为。
-- **服务提供的约定**：服务的**唯一声明入口**是注册选项 `WithService[T](get)`——`get` 是取值函数，激活后从组件实例取出服务值，类型由泛型参数编译期固定（无 `any`、无运行期校验）。一个组件可声明多个服务（多次 `WithService`）。服务按「类型 → 节点 id」登记，**同类型允许多个提供者并存**（如 main / admin 两个 web 实例），不再有装配期唯一性约束。查找只通过 `Scope`：`scope.Get[T]()` 在唯一提供者时直接命中；多提供者时沿「自身 + 父链向上」取最近的声明者（组件挂在哪就属于哪，契合重用组件的父子约定），父链无匹配则报错提示 `GetFrom[T](id)` 按节点 id 显式取。惰性激活遵循同一优先级：多候选时只激活父链命中的节点。服务组件（声明了 `WithService`）默认惰性，`Eager()` 覆盖为启动激活（渠道如 web）；`TryGet / TryGetFrom` 报告错误，`Get / GetFrom` 返回零值；`Activate(id)` 可手动激活任意 lazy 节点。组件发现用 `loong.Components()`（type / desc / service / eager / emits 元数据）。
+- **服务提供的约定**：服务的**唯一声明入口**是注册选项 `WithService[T](get)`——`get` 是取值函数，激活后从组件实例取出服务值，类型由泛型参数编译期固定（无 `any`、无运行期校验）。一个组件可声明多个服务（多次 `WithService`）。服务按「类型 → 节点 id」登记，**同类型允许多个提供者并存**（如 main / admin 两个 web 实例），不再有装配期唯一性约束。查找只通过 `Scope`：`scope.Get[T]()` 在唯一提供者时直接命中；多提供者时沿「自身 + 父链向上」取最近的声明者（组件挂在哪就属于哪，契合重用组件的父子约定），父链无匹配则报错提示 `GetFrom[T](id)` 按节点 id 显式取。惰性激活遵循同一优先级：多候选时只激活父链命中的节点。**激活与"是否提供服务"无关**——服务组件与其他组件一样默认装配激活，需要按需就在配置树标 `lazy: true`（首次查找时激活）；`TryGet / TryGetFrom` 报告错误，`Get / GetFrom` 返回零值；`Activate(id)` 可手动激活任意 lazy 节点。组件发现用 `loong.Components()`（type / desc / service 类型 / emits / config 元数据）。
 - **装配失败清理**：Build / Run 阶段任一组件失败，已 Build 的组件会按逆序 Stop（释放 db / server 等资源），`Shutdown` 在未装配或装配失败后调用均为安全空操作。
 - **约束**：组件的可变部分必须走配置 / 接口，不能写死全局状态。
 
@@ -195,7 +195,7 @@ children:
 CLI 应用与常驻渠道共用同一心智：**父组件定义其子节点的激活方式**（`Scope.Activate`），激活链全程是框架能力，无外部分发代码。`components/cli` 提供：
 
 - **父定义子激活（框架原语）**：`Scope.Activate(id string, args any)` —— 父节点激活自己的直接子节点，参数经子节点的 `Scope.Args` 注入；激活保持按节点幂等（参数首次激活生效）。这是通用能力，不限于 CLI（向导流程、状态机、插件选择皆可用）。
-- **cli 核心（`components/cli`）**：总控 `cli`（type `cli`，Eager，Run 解析 os.Args 激活首段命令并传参，无参数/未知命令返回 `ErrUsage`）+ 通用组容器 `cli.group`（把第一参数当子命令 `Activate` 下去，零定制，多级命令即树层级）+ 参数辅助 `HasFlag` / `Flag` / `Positional`。**只引入核心即可开发 CLI**。
+- **cli 核心（`components/cli`）**：总控 `cli`（type `cli`，Run 解析 os.Args 激活首段命令并传参，无参数/未知命令返回 `ErrUsage`）+ 通用组容器 `cli.group`（把第一参数当子命令 `Activate` 下去，零定制，多级命令即树层级）+ 参数辅助 `HasFlag` / `Flag` / `Positional`。**只引入核心即可开发 CLI**。
 - **平台命令（可选，`components/cli/commands`）**：`cli.list` / `cli.new` / `cli.tree` 独立子包，按需 `_ import`——不需要就不引入（yaml 里也不出现对应类型）。
 - **命令 = lazy 子组件**：业务命令挂载在总控下，`Run` 里读 `ctx.Args` 执行；CLI 是完整 loong 应用，同时挂载 `log` 组件获得日志（命令/错误经 slog 记录）。
 - **退出码**：`ErrUsage` sentinel 标记用法错误（错误分类由 cli 包给出，映射到具体数字是应用级决策——examples/cli 用 2，且**任何错误先记录再退出**）。命令在装配期执行（总控 Run 触发），`main` 只负责启动 + 错误映射 + `Shutdown`。
