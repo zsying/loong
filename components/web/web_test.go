@@ -113,6 +113,26 @@ func TestRecoverMiddleware(t *testing.T) {
 	}
 }
 
+func TestRouterRoutes(t *testing.T) {
+	r := NewRouter()
+	r.Get("/hello", func(w http.ResponseWriter, _ *http.Request) {})
+	r.Group("/admin").Get("/users", func(w http.ResponseWriter, _ *http.Request) {})
+	r.Handle("", "/", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	got := r.Routes()
+	want := []Route{{Method: "GET", Path: "/hello"}, {Method: "GET", Path: "/admin/users"}, {Method: "", Path: "/"}}
+	if len(got) != len(want) {
+		t.Fatalf("Routes = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("Routes[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if routeMethod("") != "*" || routeMethod("GET") != "GET" {
+		t.Errorf("routeMethod wrong: %q %q", routeMethod(""), routeMethod("GET"))
+	}
+}
+
 func TestJSONHelpers(t *testing.T) {
 	r := NewRouter()
 	r.Post("/echo", func(w http.ResponseWriter, req *http.Request) {

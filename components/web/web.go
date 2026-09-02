@@ -60,6 +60,9 @@ func (w *Web) Run(*loong.Scope) error {
 		return nil
 	}
 	slog.Info("web listening", "addr", w.cfg.Listen)
+	for _, rt := range w.router.Routes() {
+		slog.Info("web route", "method", routeMethod(rt.Method), "path", rt.Path)
+	}
 	w.srv = &http.Server{
 		Addr:              w.cfg.Listen,
 		Handler:           w.router,
@@ -89,4 +92,13 @@ func init() {
 		loong.WithService(func(c loong.Component) *Router { return c.(*Web).router }),
 		loong.WithDesc("web channel: HTTP server with a Router registration surface"),
 	)
+}
+
+// routeMethod renders the method label for startup output: catch-all
+// registrations (empty method) are shown as "*".
+func routeMethod(m string) string {
+	if m == "" {
+		return "*"
+	}
+	return m
 }
