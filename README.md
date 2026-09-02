@@ -18,17 +18,17 @@ Every new software project starts by re-implementing the same parts: login, conf
 - **Schema-per-component config tree** — the kernel reads only the skeleton (`type` / `id` / `config` / `children`); every component decodes its own opaque `config` block from a YAML file, so config structure grows freely with the components you mount.
 - **Two-way parent-child communication** — config injected downward at build time, events emitted upward at runtime, type-based service lookup as a side channel.
 - **Tree-scoped service lookup** — `ctx.Get[T]()` resolves the sole provider, or the closest one on the node's parent chain when several exist (`GetFrom[T](id)` disambiguates); services are declared at registration via `loong.WithService[T](get)` (multiple per component), never through global state.
-- **Lazy activation** — assembly registers the tree without instantiating anything; only required components are built and run at startup, while service components (unless `Eager()`) and nodes marked `lazy: true` are activated on first use.
+- **Lazy activation** — activation is one rule: nodes are built at startup unless marked `lazy: true` in the config tree; lazy nodes (and service lookups that hit an inactive provider) are activated on first use.
 - **Component catalog** — `loong.Components()` lists every registered type with its description, services, activation mode and emitted events, so consumers can discover and wire components without reading source.
 - **Single-process monolith** — the whole tree runs in one process; simple to debug, zero network overhead between components.
-- **Zero-framework web channel** — stdlib `net/http` (Go 1.22 routing patterns) + JWT.
+- **Zero-framework web channel** — stdlib `net/http` (Go 1.22 routing patterns) behind a friendly `*web.Router` registration surface; sessions (`auth`), account API (`web.account`) and static hosting (`web.static`) are separate optional components.
 
 ## Repository layout
 
 ```
 loong/
 ├── *.go            # kernel (package loong, the platform itself)
-├── components/     # platform components: log, user, web
+├── components/     # platform components: log, user, auth, web, cli
 ├── examples/       # sample projects
 └── docs/           # design documents
 ```
@@ -60,7 +60,7 @@ curl -X POST localhost:8080/api/auth/login \
 # protected endpoint (requires "Authorization: Bearer <token>")
 curl localhost:8080/api/me -H "Authorization: Bearer <token>"
 
-# business component mounted under the web channel (emits an event upward)
+# business component mounted under the web channel
 curl localhost:8080/api/greet
 ```
 
@@ -124,9 +124,8 @@ func (g *greet) Build(ctx *loong.Scope) error {
     }
     // 2. wire dependencies / register routes through parent services
     if r := ctx.Get[*web.Router](); r != nil {
-        r.Handle("GET", "/api/greet", func(w http.ResponseWriter, _ *http.Request) {
-            _ = g.Emit("biz.greet.hello", "hi") // event flows upward to the parent
-            w.Write([]byte("greetings\n"))
+        r.Get("/api/greet", func(w http.ResponseWriter, req *http.Request) {
+            web.WriteJSON(w, http.StatusOK, map[string]string{"msg": "greetings"})
         })
     }
     return nil
@@ -135,25 +134,40 @@ func (g *greet) Build(ctx *loong.Scope) error {
 func init() {
     loong.RegisterComponent("biz.greet", func() loong.Component { return &greet{} },
         loong.WithConfig[greetConfig](), // declare your config struct (shown by Components())
-        loong.WithEvents("biz.greet.hello"),
         loong.WithDesc("sample business component"),
     )
 }
 ```
 
-Then declare the component in your config tree (`loong.yaml`). The root can be the kernel-provided `base` container — a no-op root that needs no custom component declaration:
+Mount the business component under a web channel and add the platform
+capabilities you want as components in your config tree (`loong.yaml`).
+The root can be the kernel-provided `base` container — a no-op root
+that needs no custom component declaration:
 
 ```yaml
 type: base
 config:
   name: myproject
 children:
+  - type: user
+    id: users
+  - type: auth                # session tokens (JWT): issue/verify + Guard
+    id: sessions
+    config:
+      secret: ${JWT_SECRET}
   - type: web
     id: main
     config:
       listen: ":8080"
     children:
-      - type: biz.greet
+      - type: web.account     # optional: register / login / me over user + auth
+        id: account
+      - type: web.static      # optional: static hosting + SPA fallback
+        id: site
+        config:
+          dir: ./dist
+          spa: true
+      - type: biz.greet       # the component above registers its own route
         config:
           route: /api/greet
 ```

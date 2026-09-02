@@ -11,12 +11,21 @@ children:
     id: users
     config:
       db_path: ./hello.db
+  - type: auth
+    id: sessions
+    config:
+      secret: ${LOONG_JWT_SECRET}
   - type: web
     id: main
     config:
       listen: ":8080"
-      jwt_secret: ${LOONG_JWT_SECRET}
     children:
+      # account API (register / login / me) — mount only when the
+      # standard password login is wanted.
+      - type: web.account
+        id: account
+      # business components register their own endpoints on the
+      # parent's Router in Build.
       - type: biz.greet
         id: greet
         config:

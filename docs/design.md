@@ -37,7 +37,7 @@
 - **配置树格式：YAML**，两段式解析（schema-per-component），详见 4.2。
 - **日志：标准库 log/slog**，console（彩色文本，默认）/ json 双格式、级别可配，零外部依赖。
 - **服务查找：Scope.Get[T]()** 树优先级（唯一提供者或父链最近），Go 类型即 key（不用字符串）。
-- **Web 渠道：标准库 net/http（Go 1.22 方法+路径路由）+ golang-jwt**。
+- **Web 渠道：标准库 net/http（Go 1.22 方法+路径路由）**；会话令牌由独立 `auth` 组件提供（golang-jwt），渠道组件本身不持有任何鉴权/账号逻辑。
 - **用户存储：modernc.org/sqlite（纯 Go，无 cgo）**，内核留存储接口，后续可换后端。
 - **微信 API：自写最小 HTTP 封装**（code2session / OAuth / 模板消息 / 回调验签），不引入 SDK。
 - **模块名：github.com/zsying/loong**。
@@ -57,7 +57,7 @@
 | 组件上下文 | `loong.Scope`（刻意避开标准库 `context.Context` 同名冲突） |
 | 日志 | 标准库 log/slog，console（彩色）/ json 双格式、级别可配 |
 | 用户存储 | modernc.org/sqlite（纯 Go，无 cgo） |
-| Web 渠道 | 标准库 net/http + golang-jwt |
+| Web 渠道 | 标准库 net/http 通道（`*web.Router` 注册面）；会话 `auth` 组件（golang-jwt） |
 | 微信 API | 自写最小 HTTP 封装（不引入 SDK） |
 | 邮件 / unionid | 扩展组件，v0.1 不实现 |
 | 仓库结构 | 核心在根 loong 包 + components/（含 cli）+ examples/（含 cli）+ docs/ |
@@ -68,7 +68,7 @@
 ```
 loong/
 ├── *.go           # 内核（package loong，仓库根即平台核心）
-├── components/    # 平台组件：log / user / web / cli（cli/commands 为可选命令集）
+├── components/    # 平台组件：log / user / auth / web（web/static、web/account 可选）/ cli（cli/commands 为可选命令集）
 ├── examples/      # 示例项目（hello：Web 渠道；cli：CLI 组件化模板）
 └── docs/          # 设计文档
 ```
@@ -158,24 +158,36 @@ type: base
 config:
   name: myproject
 children:
-  - type: web
+  - type: log
+    id: logger
+    config:
+      level: info
+  - type: user
+    id: users
+  - type: auth                # 会话令牌：跨渠道组件，只依赖 net/http
+    id: sessions
+    config:
+      secret: ${JWT_SECRET}
+  - type: web                 # web = 纯通道：listen + 注册面 *web.Router
     id: main
     config:
       listen: ":8080"
     children:
-      - type: biz.books        # 业务组件挂到 web 下
+      - type: web.account     # 可选：标准账号 API（register/login/me），挂 web 下即用
+        id: account
+      - type: web.static      # 可选：静态托管 + SPA fallback（纯 API 后端不挂）
+        id: site
+        config:
+          dir: ./dist
+          spa: true
+      - type: biz.books       # 业务组件挂到 web 下，Build 里 r.Get(...) 注册自己的端点
+        id: books
         config:
           route: /api/books
-    - type: wechat.miniprogram
-      id: mp
-      config:
-        appid: wx123            # openid 登录 + 订阅消息
-    - type: user
-      id: users
-    - type: log
-      id: logger
-      config:
-        level: info
+  - type: wechat.miniprogram
+    id: mp
+    config:
+      appid: wx123            # openid 登录 + 订阅消息
 ```
 
 ### 4.3 父节点决定组件要求（配置继承与覆盖）
@@ -201,6 +213,41 @@ CLI 应用与常驻渠道共用同一心智：**父组件定义其子节点的�
 - **退出码**：`ErrUsage` sentinel 标记用法错误（错误分类由 cli 包给出，映射到具体数字是应用级决策——examples/cli 用 2，且**任何错误先记录再退出**）。命令在装配期执行（总控 Run 触发），`main` 只负责启动 + 错误映射 + `Shutdown`。
 - **入口 = 普通 loong 应用**：不提供启动封装（无 cli.Go）——配置树内联用 `Parse + New + Assemble`，文件用 `loong.LoadAndRun`，退出码映射由 main 决定；examples/cli 展示两种入口。
 - 任何 loong 应用挂载这些组件即可获得组件化 CLI；`examples/cli` 是完整模板（总控 + log + 业务命令 + 多级命令 + 平台命令）。扩展命令 = 注册组件类型 + yaml 加 lazy 节点。
+
+### 4.5 Web 通道组件化（web 模式）
+
+web 组件定位为**纯 HTTP 通道**：server 生命周期（listen / 优雅关停 / 超时）+ 一个注册面服务 `*web.Router`。会话、账号 API、静态托管、业务端点一律是挂到 web 下的组件——配置树声明即装配，与 cli 家族（总控 + 可选命令）同一心智：
+
+- **`web`（`components/web`）**：Config 只含 `listen`（`log: false` 可关请求日志）。**不 import user/auth、不订阅业务事件**；默认中间件 Recover（panic → 500）+ 请求日志（Debug）。
+- **注册面 `*web.Router`（服务）**：`Handle` / `Get` / `Post` / `Put` / `Patch` / `Delete`、`Group(prefix, mws...)`（前缀 + 组中间件，如 `/admin` + Guard）、`Use`（全局中间件）、`ServeHTTP`（可直接测试）。底层是 stdlib ServeMux（Go 1.22 方法+路径），中间件类型 = `func(http.Handler) http.Handler`，net/http 生态全兼容；附带 `WriteJSON` / `ReadJSON` 助手。业务组件注册端点不再接触 mux。
+- **`auth`（`components/auth`，跨渠道可复用）**：Config{secret, ttl}；服务 `Issue(sub)` / `Guard(next)` / 包级 `Identity(r)`；只依赖 net/http + golang-jwt，不认识 web/user。
+- **`web.account`（可选）**：标准账号 API register / login / me，编排 `user.Service` + `auth.Service`，挂到 web 下即用；不需要标准密码登录就不挂。
+- **`web.static`（可选）**：Config{dir, spa}，向父 Router 注册 `/`（spa 时未命中文件回退 index.html）。
+
+装配示例（API 后端 + 静态站 + 账号）：
+
+```yaml
+children:
+  - type: user
+    id: users
+  - type: auth
+    id: sessions
+    config:
+      secret: ${JWT_SECRET}
+  - type: web
+    id: main
+    config:
+      listen: ":8080"
+    children:
+      - type: web.account      # 账号 API（可选）
+      - type: web.static       # 静态站（可选），纯 API 后端不挂
+        config: { dir: ./dist, spa: true }
+      - type: biz.books        # 业务组件：Build 里 ctx.Get[*web.Router]() 注册端点
+```
+
+鉴权 = 显式选择（与 CLI flag「显式声明别名」同哲学）：业务组件对敏感路由用 `Group("/admin", authSvc.Guard)` 或 `r.Handle("GET", "/x", authSvc.Guard(h))`，不做隐形全局规则。user/auth 与 web 的树位置无硬性要求——服务查找按需激活、唯一提供者全局命中（多实例时沿父链就近或用 `GetFrom[T](id)`），默认把能力组件与使用它们的通道放同一子树更清晰。
+
+设计动机：旧实现把会话 / 账号端点 / 静态托管 / 裸 mux 注册 / 业务事件订阅全塞进一个 web 组件（纯为 examples/hello 演示），换鉴权方案要改通道源码、平台组件还认识业务事件。拆分后 web 保持最小，业务扩展 = 挂子组件 + 写注册代码，零新概念。
 
 ## 5. 渠道适配
 

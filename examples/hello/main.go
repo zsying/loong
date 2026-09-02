@@ -1,8 +1,8 @@
 // Command hello is the v0.1 sample project. It demonstrates the loong
-// kernel with log, user and web components, plus a business component
-// mounted under the web channel, started via loong.LoadAndRun and shut
-// down gracefully on SIGINT/SIGTERM. The config tree root uses the
-// kernel-provided "base" container, so no custom root component is
+// kernel with log, user, auth and web components, plus a business
+// component mounted under the web channel, started via loong.LoadAndRun
+// and shut down gracefully on SIGINT/SIGTERM. The config tree root uses
+// the kernel-provided "base" container, so no custom root component is
 // declared here.
 package main
 
@@ -11,9 +11,11 @@ import (
 	"net/http"
 	"os"
 
+	_ "github.com/zsying/loong/components/auth"
 	_ "github.com/zsying/loong/components/log"
 	_ "github.com/zsying/loong/components/user"
 	"github.com/zsying/loong/components/web"
+	_ "github.com/zsying/loong/components/web/account"
 
 	"github.com/zsying/loong"
 )
@@ -23,9 +25,9 @@ type greetConfig struct {
 }
 
 // greet is a business component mounted under the web channel. It
-// registers an HTTP route through the parent's Router service and
-// emits an event upward on each request. Embedding loong.Base keeps
-// the three other phases as no-ops.
+// registers an HTTP route through the parent's Router service — the
+// registration surface hides the underlying mux, so business code only
+// names a method, a path and a plain http handler.
 type greet struct {
 	loong.Base
 	route string
@@ -39,9 +41,8 @@ func (g *greet) Build(ctx *loong.Scope) error {
 	g.Base.Build(ctx)
 	g.route = cfg.Route
 	if r := ctx.Get[*web.Router](); r != nil {
-		r.Handle("GET", g.route, func(rw http.ResponseWriter, req *http.Request) {
-			_ = g.Emit("biz.greet.hello", map[string]string{"msg": "greetings from biz"})
-			_, _ = rw.Write([]byte("greetings from biz component\n"))
+		r.Get(g.route, func(w http.ResponseWriter, req *http.Request) {
+			web.WriteJSON(w, http.StatusOK, map[string]string{"msg": "greetings from biz component"})
 		})
 	}
 	return nil
@@ -50,7 +51,6 @@ func (g *greet) Build(ctx *loong.Scope) error {
 func init() {
 	loong.RegisterComponent("biz.greet", func() loong.Component { return &greet{} },
 		loong.WithConfig[greetConfig](),
-		loong.WithEvents("biz.greet.hello"),
 		loong.WithDesc("sample business component mounted under a web channel"),
 	)
 }

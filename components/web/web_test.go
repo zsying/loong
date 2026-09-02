@@ -1,102 +1,142 @@
 package web
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
-
-	"github.com/zsying/loong/components/user"
 )
 
-// newTestServer wires a Web component with an in-memory user store.
-func newTestServer(t *testing.T) *httptest.Server {
+func getReq(t *testing.T, h http.Handler, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
-	svc, err := user.OpenService(":memory:")
-	if err != nil {
-		t.Fatal(err)
+	var rdr io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rdr = bytes.NewReader(data)
 	}
-	t.Cleanup(func() { _ = svc.Close() })
-
-	w := &Web{cfg: Config{JWTSecret: "test-secret"}, users: svc}
-	w.mux = http.NewServeMux()
-	w.mux.HandleFunc("POST /api/auth/register", w.handleRegister)
-	w.mux.HandleFunc("POST /api/auth/login", w.handleLogin)
-	w.mux.HandleFunc("GET /api/me", w.requireAuth(w.handleMe))
-	srv := httptest.NewServer(w.mux)
-	t.Cleanup(srv.Close)
-	return srv
+	req := httptest.NewRequest(method, path, rdr)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
 }
 
-func postJSON(t *testing.T, url, body string) (int, string) {
-	t.Helper()
-	resp, err := http.Post(url, "application/json", strings.NewReader(body))
-	if err != nil {
-		t.Fatal(err)
+func TestRouterVerbsAndPaths(t *testing.T) {
+	r := NewRouter()
+	r.Get("/hello", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("get")) })
+	r.Post("/hello", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("post")) })
+	// Go 1.22 path values flow through unchanged.
+	r.Get("/users/{id}", func(w http.ResponseWriter, req *http.Request) {
+		_, _ = w.Write([]byte(req.PathValue("id")))
+	})
+
+	if rec := getReq(t, r, http.MethodGet, "/hello", nil); rec.Code != 200 || rec.Body.String() != "get" {
+		t.Errorf("GET /hello = %d %q", rec.Code, rec.Body.String())
 	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
-	return resp.StatusCode, string(data)
+	if rec := getReq(t, r, http.MethodPost, "/hello", nil); rec.Code != 200 || rec.Body.String() != "post" {
+		t.Errorf("POST /hello = %d %q", rec.Code, rec.Body.String())
+	}
+	if rec := getReq(t, r, http.MethodGet, "/users/42", nil); rec.Code != 200 || rec.Body.String() != "42" {
+		t.Errorf("GET /users/42 = %d %q", rec.Code, rec.Body.String())
+	}
 }
 
-func get(t *testing.T, url, token string) int {
-	t.Helper()
-	req, _ := http.NewRequest(http.MethodGet, url, nil)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
+func TestRouterGroup(t *testing.T) {
+	r := NewRouter()
+	// guard is a group middleware marking requests as authorized.
+	guard := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if req.Header.Get("X-Token") == "" {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
+			next.ServeHTTP(w, req)
+		})
 	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
+	admin := r.Group("/admin", guard)
+	admin.Get("/users", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	r.Get("/open", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("open")) })
+
+	// Grouped handler mounted under the prefix and guarded.
+	if rec := getReq(t, r, http.MethodGet, "/admin/users", nil); rec.Code != http.StatusForbidden {
+		t.Errorf("guarded without token = %d, want 403", rec.Code)
 	}
-	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
-	return resp.StatusCode
+	req := httptest.NewRequest(http.MethodGet, "/admin/users", nil)
+	req.Header.Set("X-Token", "t")
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+	if rec.Code != 200 || rec.Body.String() != "ok" {
+		t.Errorf("guarded with token = %d %q", rec.Code, rec.Body.String())
+	}
+	// Ungrouped route is not guarded.
+	if rec := getReq(t, r, http.MethodGet, "/open", nil); rec.Code != 200 || rec.Body.String() != "open" {
+		t.Errorf("open route = %d %q", rec.Code, rec.Body.String())
+	}
 }
 
-func TestAuthFlow(t *testing.T) {
-	srv := newTestServer(t)
+func TestRouterUseServerWide(t *testing.T) {
+	r := NewRouter()
+	var seen []string
+	mark := func(tag string) Middleware {
+		return func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+				seen = append(seen, tag)
+				next.ServeHTTP(w, req)
+			})
+		}
+	}
+	r.Use(mark("a"), mark("b"))
+	r.Get("/x", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("x")) })
+	if rec := getReq(t, r, http.MethodGet, "/x", nil); rec.Code != 200 {
+		t.Fatalf("GET /x = %d", rec.Code)
+	}
+	// Outermost middleware runs first.
+	if len(seen) != 2 || seen[0] != "a" || seen[1] != "b" {
+		t.Errorf("middleware order = %v, want [a b]", seen)
+	}
+}
 
-	// register succeeds and returns the user.
-	code, body := postJSON(t, srv.URL+"/api/auth/register",
-		`{"username":"john","password":"secret123","nickname":"John"}`)
-	if code != http.StatusOK {
-		t.Fatalf("register status = %d, body = %s", code, body)
+func TestRecoverMiddleware(t *testing.T) {
+	r := NewRouter()
+	r.Use(Recover())
+	r.Get("/panic", func(http.ResponseWriter, *http.Request) { panic("boom") })
+	r.Get("/ok", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	if rec := getReq(t, r, http.MethodGet, "/panic", nil); rec.Code != http.StatusInternalServerError {
+		t.Errorf("panic = %d, want 500", rec.Code)
 	}
+	if rec := getReq(t, r, http.MethodGet, "/ok", nil); rec.Code != 200 {
+		t.Errorf("ok = %d, want 200", rec.Code)
+	}
+}
 
-	// duplicate register is a 409, not a leaked internal error.
-	code, _ = postJSON(t, srv.URL+"/api/auth/register",
-		`{"username":"john","password":"secret123","nickname":"John"}`)
-	if code != http.StatusConflict {
-		t.Errorf("duplicate register status = %d, want 409", code)
+func TestJSONHelpers(t *testing.T) {
+	r := NewRouter()
+	r.Post("/echo", func(w http.ResponseWriter, req *http.Request) {
+		var in struct {
+			Name string `json:"name"`
+		}
+		if err := ReadJSON(req, &in); err != nil {
+			http.Error(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		WriteJSON(w, http.StatusOK, map[string]string{"name": in.Name})
+	})
+	rec := getReq(t, r, http.MethodPost, "/echo", map[string]string{"name": "john"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /echo = %d", rec.Code)
 	}
-
-	// login returns a token.
-	code, body = postJSON(t, srv.URL+"/api/auth/login",
-		`{"username":"john","password":"secret123"}`)
-	if code != http.StatusOK {
-		t.Fatalf("login status = %d, body = %s", code, body)
+	if ct := rec.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("content type = %q", ct)
 	}
-	var loginResp struct {
-		Token string `json:"token"`
+	var out map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil || out["name"] != "john" {
+		t.Errorf("body = %s, want {\"name\":\"john\"}", rec.Body.String())
 	}
-	if err := json.Unmarshal([]byte(body), &loginResp); err != nil || loginResp.Token == "" {
-		t.Fatalf("login body = %s, want token", body)
-	}
-
-	// protected endpoint: token accepted, missing token rejected.
-	if code := get(t, srv.URL+"/api/me", loginResp.Token); code != http.StatusOK {
-		t.Errorf("me with token = %d, want 200", code)
-	}
-	if code := get(t, srv.URL+"/api/me", ""); code != http.StatusUnauthorized {
-		t.Errorf("me without token = %d, want 401", code)
-	}
-
-	// wrong password is a 401.
-	if code, _ := postJSON(t, srv.URL+"/api/auth/login",
-		`{"username":"john","password":"wrong"}`); code != http.StatusUnauthorized {
-		t.Errorf("login with wrong password = %d, want 401", code)
+	if rec := getReq(t, r, http.MethodPost, "/echo", "not-json"); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad json = %d, want 400", rec.Code)
 	}
 }
