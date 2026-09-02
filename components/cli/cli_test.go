@@ -9,23 +9,27 @@ import (
 )
 
 func TestArgsHelpers(t *testing.T) {
-	args := []string{"--html", "--o=out", "name", "-h"}
+	args := []string{"--html", "-o=out", "name", "-h"}
+	// Long flag spelled --word, short flag spelled -x.
 	if !HasFlag(args, "html") {
-		t.Error("HasFlag(html) = false")
+		t.Error("HasFlag(html) = false for --html")
 	}
-	// Long and short spellings of the same flag, queried separately or
-	// together as aliases.
 	if !HasFlag(args, "h") {
 		t.Error("HasFlag(h) = false for -h")
 	}
+	// Long and short spellings of the same option, queried together
+	// as aliases, in either order.
 	if !HasFlag(args, "h", "html") {
 		t.Error("HasFlag(h, html) = false")
+	}
+	if !HasFlag(args, "html", "h") {
+		t.Error("HasFlag(html, h) = false")
 	}
 	if HasFlag(args, "json") {
 		t.Error("HasFlag(json) = true")
 	}
-	// A short name must not leak into a longer flag: "-h" and "--html"
-	// must not satisfy a query for "he".
+	// A short name must not leak into a longer flag: "-h" and
+	// "--html" must not satisfy a query for "he".
 	if HasFlag(args, "he") {
 		t.Error("HasFlag(he) = true, short name leaked into longer flag")
 	}
@@ -44,6 +48,22 @@ func TestArgsHelpers(t *testing.T) {
 	}
 }
 
+// TestStrictSpelling pins the dash-count convention: a word is only
+// "--word" and a single letter is only "-x". Mixed forms such as
+// "-html" or "--h" must not match their conventional counterparts.
+func TestStrictSpelling(t *testing.T) {
+	args := []string{"-html", "--h", "--o=out", "-output=out"}
+	if HasFlag(args, "html") || HasFlag(args, "h") || HasFlag(args, "h", "html") {
+		t.Errorf("HasFlag matched %v with a mixed spelling", args)
+	}
+	if v, ok := Flag(args, "o"); ok {
+		t.Errorf("Flag(o) = %q, want absent for --o=out", v)
+	}
+	if v, ok := Flag(args, "output"); ok {
+		t.Errorf("Flag(output) = %q, want absent for -output=out", v)
+	}
+}
+
 func TestShortValueFlag(t *testing.T) {
 	args := []string{"-o=out", "name"}
 	if !HasFlag(args, "o") {
@@ -55,6 +75,16 @@ func TestShortValueFlag(t *testing.T) {
 	pos := Positional(args)
 	if len(pos) != 1 || pos[0] != "name" {
 		t.Errorf("Positional = %v, want [name]", pos)
+	}
+}
+
+func TestLongValueFlag(t *testing.T) {
+	args := []string{"--output=out", "name"}
+	if !HasFlag(args, "output") {
+		t.Error("HasFlag(output) = false for --output")
+	}
+	if v, ok := Flag(args, "o", "output"); !ok || v != "out" {
+		t.Errorf("Flag(o, output) = %q,%v", v, ok)
 	}
 }
 

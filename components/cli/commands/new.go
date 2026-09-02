@@ -21,11 +21,11 @@ func (c *New) Run(ctx *loong.Scope) error {
 	args, _ := ctx.Args.([]string)
 	pos := cli.Positional(args)
 	if len(pos) == 0 {
-		return fmt.Errorf("cli new: missing component name (usage: cli new <name>)")
+		return fmt.Errorf("cli new: missing component name (usage: cli new [--output=DIR|-o=DIR] <name>)")
 	}
 	name := pos[0]
 	outDir := "."
-	if d, ok := cli.Flag(args, "o"); ok {
+	if d, ok := cli.Flag(args, "o", "output"); ok {
 		outDir = d
 	}
 	src, err := scaffoldComponent(name)
