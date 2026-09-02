@@ -195,7 +195,7 @@ children:
 CLI 应用与常驻渠道共用同一心智：**父组件定义其子节点的激活方式**（`Scope.Activate`），激活链全程是框架能力，无外部分发代码。`components/cli` 提供：
 
 - **父定义子激活（框架原语）**：`Scope.Activate(id string, args any)` —— 父节点激活自己的直接子节点，参数经子节点的 `Scope.Args` 注入；激活保持按节点幂等（参数首次激活生效）。这是通用能力，不限于 CLI（向导流程、状态机、插件选择皆可用）。
-- **cli 核心（`components/cli`）**：总控 `cli`（type `cli`，Run 解析 os.Args 激活首段命令并传参，无参数/未知命令返回 `ErrUsage`）+ 通用组容器 `cli.group`（把第一参数当子命令 `Activate` 下去，零定制，多级命令即树层级）+ 参数辅助 `HasFlag` / `Flag` / `Positional`。**只引入核心即可开发 CLI**。
+- **cli 核心（`components/cli`）**：总控 `cli`（type `cli`，Run 解析 os.Args 激活首段命令并传参，无参数/未知命令返回 `ErrUsage`）+ 通用组容器 `cli.group`（把第一参数当子命令 `Activate` 下去，零定制，多级命令即树层级）+ 参数辅助 `HasFlag` / `Flag` / `Positional`：flag 支持 `--html` 与 `-h` 长短两种拼写（查询时并列别名，如 `HasFlag(args, "h", "html")` 同时匹配 `-h` 与 `--html`；值 flag 同理 `Flag(args, "o", "output")` 匹配 `-o=out`/`--output=out`）。**只引入核心即可开发 CLI**。
 - **平台命令（可选，`components/cli/commands`）**：`cli.list` / `cli.new` / `cli.tree` 独立子包，按需 `_ import`——不需要就不引入（yaml 里也不出现对应类型）。
 - **命令 = lazy 子组件**：业务命令挂载在总控下，`Run` 里读 `ctx.Args` 执行；CLI 是完整 loong 应用，同时挂载 `log` 组件获得日志（命令/错误经 slog 记录）。
 - **退出码**：`ErrUsage` sentinel 标记用法错误（错误分类由 cli 包给出，映射到具体数字是应用级决策——examples/cli 用 2，且**任何错误先记录再退出**）。命令在装配期执行（总控 Run 触发），`main` 只负责启动 + 错误映射 + `Shutdown`。

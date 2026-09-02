@@ -20,7 +20,7 @@ type List struct {
 func (c *List) Run(ctx *loong.Scope) error {
 	args, _ := ctx.Args.([]string)
 	infos := loong.Components()
-	if cli.HasFlag(args, "html") {
+	if cli.HasFlag(args, "h", "html") {
 		fmt.Print(renderListHTML(infos))
 	} else {
 		fmt.Print(renderListText(infos))

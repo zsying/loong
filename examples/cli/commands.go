@@ -23,7 +23,7 @@ func (g *Greet) Run(ctx *loong.Scope) error {
 	if pos := cli.Positional(args); len(pos) > 0 {
 		name = pos[0]
 	}
-	loud := cli.HasFlag(args, "loud")
+	loud := cli.HasFlag(args, "l", "loud")
 	slog.Info("greet", "name", name, "loud", loud)
 	if loud {
 		fmt.Printf("HELLO, %s!\n", name)
@@ -31,12 +31,6 @@ func (g *Greet) Run(ctx *loong.Scope) error {
 	}
 	fmt.Printf("hello, %s\n", name)
 	return nil
-}
-
-func init() {
-	loong.RegisterComponent("demo.greet", func() loong.Component { return &Greet{} },
-		loong.WithDesc("demo business command: greet [name] [--loud]"),
-	)
 }
 
 // ConfigShow prints a demo config key (multi-level command demo:
@@ -72,6 +66,10 @@ func (c *ConfigSet) Run(ctx *loong.Scope) error {
 }
 
 func init() {
+	loong.RegisterComponent("demo.greet", func() loong.Component { return &Greet{} },
+		loong.WithDesc("demo business command: greet [name] [--loud|-l]"),
+	)
+
 	loong.RegisterComponent("demo.config.show", func() loong.Component { return &ConfigShow{} },
 		loong.WithDesc("demo multi-level command: show a config key"),
 	)

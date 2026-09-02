@@ -9,18 +9,48 @@ import (
 )
 
 func TestArgsHelpers(t *testing.T) {
-	args := []string{"--html", "--o=out", "name", "-x"}
+	args := []string{"--html", "--o=out", "name", "-h"}
 	if !HasFlag(args, "html") {
 		t.Error("HasFlag(html) = false")
+	}
+	// Long and short spellings of the same flag, queried separately or
+	// together as aliases.
+	if !HasFlag(args, "h") {
+		t.Error("HasFlag(h) = false for -h")
+	}
+	if !HasFlag(args, "h", "html") {
+		t.Error("HasFlag(h, html) = false")
 	}
 	if HasFlag(args, "json") {
 		t.Error("HasFlag(json) = true")
 	}
+	// A short name must not leak into a longer flag: "-h" and "--html"
+	// must not satisfy a query for "he".
+	if HasFlag(args, "he") {
+		t.Error("HasFlag(he) = true, short name leaked into longer flag")
+	}
 	if v, ok := Flag(args, "o"); !ok || v != "out" {
 		t.Errorf("Flag(o) = %q,%v", v, ok)
 	}
+	if v, ok := Flag(args, "output", "o"); !ok || v != "out" {
+		t.Errorf("Flag(output, o) = %q,%v", v, ok)
+	}
 	if v, ok := Flag(args, "x"); ok {
 		t.Errorf("Flag(x) = %q, want absent", v)
+	}
+	pos := Positional(args)
+	if len(pos) != 1 || pos[0] != "name" {
+		t.Errorf("Positional = %v, want [name]", pos)
+	}
+}
+
+func TestShortValueFlag(t *testing.T) {
+	args := []string{"-o=out", "name"}
+	if !HasFlag(args, "o") {
+		t.Error("HasFlag(o) = false for -o")
+	}
+	if v, ok := Flag(args, "o"); !ok || v != "out" {
+		t.Errorf("Flag(o) = %q,%v", v, ok)
 	}
 	pos := Positional(args)
 	if len(pos) != 1 || pos[0] != "name" {
