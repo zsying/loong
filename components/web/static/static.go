@@ -21,6 +21,11 @@ type Config struct {
 	// SPA serves index.html for every path that does not map to an
 	// existing file (single-page apps with client-side routing).
 	SPA bool `yaml:"spa,omitempty"`
+	// API is a path prefix whose unmatched requests stay 404 in SPA
+	// mode instead of falling back to index.html — the fallback must
+	// not mask routes registered by API components (e.g. "/api").
+	// Empty disables the exclusion.
+	API string `yaml:"api,omitempty"`
 }
 
 // Static is the static hosting component. It must be mounted under a
@@ -45,13 +50,14 @@ func (s *Static) Build(ctx *loong.Scope) error {
 	if r == nil {
 		return errors.New("web.static: no web Router available (mount this component under a web node)")
 	}
-	r.Handle("", "/", handler(cfg.Dir, cfg.SPA))
+	r.Handle("", "/", handler(cfg.Dir, cfg.API, cfg.SPA))
 	return nil
 }
 
 // handler serves files from dir; with SPA enabled it falls back to
-// index.html when the path does not resolve to a regular file.
-func handler(dir string, spa bool) http.Handler {
+// index.html when the path does not resolve to a regular file, except
+// under apiPrefix where unmatched requests stay 404.
+func handler(dir, apiPrefix string, spa bool) http.Handler {
 	fs := http.FileServer(http.Dir(dir))
 	if !spa {
 		return fs
@@ -69,8 +75,22 @@ func handler(dir string, spa bool) http.Handler {
 				}
 			}
 		}
+		if underPath(r.URL.Path, apiPrefix) {
+			http.NotFound(w, r)
+			return
+		}
 		http.ServeFile(w, r, filepath.Join(dir, "index.html"))
 	})
+}
+
+// underPath reports whether path equals prefix or sits below it as a
+// path segment ("/api" matches "/api" and "/api/x", not "/apix").
+func underPath(path, prefix string) bool {
+	if prefix == "" {
+		return false
+	}
+	return strings.HasPrefix(path, prefix) &&
+		(len(path) == len(prefix) || path[len(prefix)] == '/')
 }
 
 func init() {

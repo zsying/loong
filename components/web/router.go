@@ -68,10 +68,15 @@ func (r *Router) Use(mws ...Middleware) { r.mws = append(r.mws, mws...) }
 // Group returns a sub-router scoped to a path prefix with its own
 // middlewares: every handler registered on the group is mounted under
 // prefix and wrapped by the group middlewares. Groups compose and share
-// the root mux.
+// the root mux. Registration-level middlewares are inherited from a
+// parent group only; server-wide middlewares on the root (Use) stay on
+// the root and are applied by ServeHTTP for every request — they are
+// never copied into groups, or group routes would run them twice.
 func (r *Router) Group(prefix string, mws ...Middleware) *Router {
 	g := &Router{mux: r.mux, prefix: r.prefix + prefix, routes: r.routes}
-	g.mws = append(g.mws, r.mws...)
+	if !r.root {
+		g.mws = append(g.mws, r.mws...)
+	}
 	g.mws = append(g.mws, mws...)
 	return g
 }

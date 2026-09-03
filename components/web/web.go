@@ -11,7 +11,9 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 
@@ -54,22 +56,28 @@ func (w *Web) Build(scope *loong.Scope) error {
 }
 
 // Run starts serving. An empty listen address is a no-op — tests and
-// embedded setups serve the Router directly instead.
+// embedded setups serve the Router directly instead. Binding is
+// synchronous: a busy port or missing permission fails assembly
+// (Run returns the error and already-built nodes are stopped) instead
+// of silently running a dead server.
 func (w *Web) Run(*loong.Scope) error {
 	if w.cfg.Listen == "" {
 		return nil
 	}
-	slog.Info("web listening", "addr", w.cfg.Listen)
+	ln, err := net.Listen("tcp", w.cfg.Listen)
+	if err != nil {
+		return fmt.Errorf("web: listen %s: %w", w.cfg.Listen, err)
+	}
+	slog.Info("web listening", "addr", ln.Addr().String())
 	for _, rt := range w.router.Routes() {
 		slog.Info("web route", "method", routeMethod(rt.Method), "path", rt.Path)
 	}
 	w.srv = &http.Server{
-		Addr:              w.cfg.Listen,
 		Handler:           w.router,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	go func() {
-		if err := w.srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := w.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("web server", "err", err)
 		}
 	}()

@@ -4,10 +4,26 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
+
+	"github.com/zsying/loong"
 )
+
+func cfgNode(t *testing.T, s string) yaml.Node {
+	t.Helper()
+	var doc yaml.Node
+	if err := yaml.Unmarshal([]byte(s), &doc); err != nil {
+		t.Fatal(err)
+	}
+	return *doc.Content[0]
+}
 
 func getReq(t *testing.T, h http.Handler, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
@@ -130,6 +146,55 @@ func TestRouterRoutes(t *testing.T) {
 	}
 	if routeMethod("") != "*" || routeMethod("GET") != "GET" {
 		t.Errorf("routeMethod wrong: %q %q", routeMethod(""), routeMethod("GET"))
+	}
+}
+
+// TestGroupMiddlewareNotDoubled pins the server-wide vs group rule:
+// a server-wide Use middleware must run exactly once on group routes.
+// (Copying root middlewares into groups made them run twice.)
+func TestGroupMiddlewareNotDoubled(t *testing.T) {
+	r := NewRouter()
+	var server, group int
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			server++
+			next.ServeHTTP(w, req)
+		})
+	})
+	admin := r.Group("/admin", func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			group++
+			next.ServeHTTP(w, req)
+		})
+	})
+	admin.Get("/users", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+
+	rec := getReq(t, r, http.MethodGet, "/admin/users", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /admin/users = %d", rec.Code)
+	}
+	if server != 1 || group != 1 {
+		t.Errorf("server middleware = %d, group middleware = %d; want 1 and 1", server, group)
+	}
+}
+
+// TestWebListenFailFast verifies that an occupied port fails assembly
+// instead of silently running a dead server.
+func TestWebListenFailFast(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	addr := ln.Addr().String()
+
+	root := &loong.Node{
+		Type:     "base",
+		Children: []*loong.Node{{Type: "web", ID: "main", Config: cfgNode(t, "listen: "+strconv.Quote(addr)+"\n")}},
+	}
+	k := loong.New()
+	if err := k.Assemble(root); err == nil || !strings.Contains(err.Error(), "listen") {
+		t.Fatalf("Assemble with busy port = %v, want listen error", err)
 	}
 }
 

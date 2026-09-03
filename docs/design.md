@@ -222,7 +222,7 @@ web 组件定位为**纯 HTTP 通道**：server 生命周期（listen / 优雅�
 - **注册面 `*web.Router`（服务）**：`Handle` / `Get` / `Post` / `Put` / `Patch` / `Delete`、`Group(prefix, mws...)`（前缀 + 组中间件，如 `/admin` + Guard）、`Use`（全局中间件）、`ServeHTTP`（可直接测试）。底层是 stdlib ServeMux（Go 1.22 方法+路径），中间件类型 = `func(http.Handler) http.Handler`，net/http 生态全兼容；附带 `WriteJSON` / `ReadJSON` 助手。业务组件注册端点不再接触 mux。
 - **`auth`（`components/auth`，跨渠道可复用）**：Config{secret, ttl}；服务 `Issue(sub)` / `Guard(next)` / 包级 `Identity(r)`；只依赖 net/http + golang-jwt，不认识 web/user。
 - **`web.account`（可选）**：标准账号 API register / login / me，编排 `user.Service` + `auth.Service`，挂到 web 下即用；不需要标准密码登录就不挂。
-- **`web.static`（可选）**：Config{dir, spa}，向父 Router 注册 `/`（spa 时未命中文件回退 index.html）。
+- **`web.static`（可选）**：Config{dir, spa, api?}，向父 Router 注册 `/`（spa 时未命中文件回退 index.html；`api: /api` 前缀的未命中路径保持 404，SPA fallback 不遮蔽 API 路由）。
 
 装配示例（API 后端 + 静态站 + 账号）：
 
