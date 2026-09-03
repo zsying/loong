@@ -219,10 +219,10 @@ CLI 应用与常驻渠道共用同一心智：**父组件定义其子节点的�
 web 组件定位为**纯 HTTP 通道**：server 生命周期（listen / 优雅关停 / 超时）+ 一个注册面服务 `*web.Router`。会话、账号 API、静态托管、业务端点一律是挂到 web 下的组件——配置树声明即装配，与 cli 家族（总控 + 可选命令）同一心智：
 
 - **`web`（`components/web`）**：Config 只含 `listen`（`log: false` 可关请求日志）。**不 import user/auth、不订阅业务事件**；默认中间件 Recover（panic → 500）+ 请求日志（Debug）。
-- **注册面 `*web.Router`（服务）**：`Handle` / `Get` / `Post` / `Put` / `Patch` / `Delete`、`Group(prefix, mws...)`（前缀 + 组中间件，如 `/admin` + Guard）、`Use`（全局中间件）、`ServeHTTP`（可直接测试）。底层是 stdlib ServeMux（Go 1.22 方法+路径），中间件类型 = `func(http.Handler) http.Handler`，net/http 生态全兼容；附带 `WriteJSON` / `ReadJSON` 助手。业务组件注册端点不再接触 mux。
+- **注册面 `*web.Router`（服务）**：`Handle` / `Get` / `Post` / `Put` / `Patch` / `Delete`、`Group(prefix, mws...)`（前缀 + 组中间件，如 `/admin` + Guard）、`Use`（全局中间件）、`ServeHTTP`（可直接测试）。底层是 stdlib ServeMux（Go 1.22 方法+路径），中间件类型 = `func(http.Handler) http.Handler`，net/http 生态全兼容；附带 `WriteJSON` / `ReadJSON` 助手。业务组件注册端点不再接触 mux。规则：root 的 `Use` 中间件是 server 级（ServeHTTP 统一应用一次），Group 只继承父 group 的注册级中间件；同一 method+path 重复注册 = 装配期 panic（视为路由冲突错误）。
 - **`auth`（`components/auth`，跨渠道可复用）**：Config{secret, ttl}；服务 `Issue(sub)` / `Guard(next)` / 包级 `Identity(r)`；只依赖 net/http + golang-jwt，不认识 web/user。
 - **`web.account`（可选）**：标准账号 API register / login / me，编排 `user.Service` + `auth.Service`，挂到 web 下即用；不需要标准密码登录就不挂。
-- **`web.static`（可选）**：Config{dir, spa, api?}，向父 Router 注册 `/`（spa 时未命中文件回退 index.html；`api: /api` 前缀的未命中路径保持 404，SPA fallback 不遮蔽 API 路由）。
+- **`web.static`（可选）**：Config{dir, prefix?="/", spa, api?}，向父 Router 注册前缀挂载静态树（spa 时未命中文件回退 index.html；`api: /api` 前缀的未命中路径保持 404，SPA fallback 不遮蔽 API 路由）。
 
 装配示例（API 后端 + 静态站 + 账号）：
 
@@ -281,6 +281,7 @@ children:
 - **优先嵌入 `loong.Base`**，只覆盖关心的生命周期阶段。
 - 遵守 build / run / stop 三阶段生命周期；Stop 里释放自己持有的资源（server / db / flush）。
 - 不直接持有父节点 / 兄弟节点引用。
+- **服务缺失即报错，不静默**：`Get` 无提供者 / 歧义时返回零值，组件应显式校验并返回错误（web.account / web.static / hello greet 先例），避免"挂错父节点、能力没注册但进程照跑"的排查黑洞。
 - **业务扩展 = 项目组件**：业务能力的扩展同样以项目组件形式实现（业务项目里定义组件类型 + init() 注册 + 配置树挂载），与平台组件共用同一套机制——平台不预设业务，能力以组件插拔。
 
 ## 7. v0.1 范围

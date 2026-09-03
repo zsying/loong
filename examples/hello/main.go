@@ -7,6 +7,7 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -40,11 +41,16 @@ func (g *greet) Build(ctx *loong.Scope) error {
 	}
 	g.Base.Build(ctx)
 	g.route = cfg.Route
-	if r := ctx.Get[*web.Router](); r != nil {
-		r.Get(g.route, func(w http.ResponseWriter, req *http.Request) {
-			web.WriteJSON(w, http.StatusOK, map[string]string{"msg": "greetings from biz component"})
-		})
+	// Missing services are errors, never silent skips — a greet mounted
+	// outside a web channel would otherwise register nothing and run
+	// without a trace.
+	r := ctx.Get[*web.Router]()
+	if r == nil {
+		return fmt.Errorf("biz.greet: no web Router available (mount this component under a web node)")
 	}
+	r.Get(g.route, func(w http.ResponseWriter, req *http.Request) {
+		web.WriteJSON(w, http.StatusOK, map[string]string{"msg": "greetings from biz component"})
+	})
 	return nil
 }
 

@@ -18,6 +18,10 @@ import (
 // Config is the component's own config block.
 type Config struct {
 	Dir string `yaml:"dir"`
+	// Prefix mounts the static tree under this path (default "/").
+	// Use e.g. "/assets" to host under a subtree and leave the root
+	// to other components.
+	Prefix string `yaml:"prefix,omitempty"`
 	// SPA serves index.html for every path that does not map to an
 	// existing file (single-page apps with client-side routing).
 	SPA bool `yaml:"spa,omitempty"`
@@ -29,7 +33,8 @@ type Config struct {
 }
 
 // Static is the static hosting component. It must be mounted under a
-// web node: it registers the catch-all "/" on the parent's Router.
+// web node: it registers a catch-all (default "/") on the parent's
+// Router.
 type Static struct {
 	loong.Base
 }
@@ -45,26 +50,41 @@ func (s *Static) Build(ctx *loong.Scope) error {
 	if _, err := os.Stat(cfg.Dir); err != nil {
 		return fmt.Errorf("web.static: %w", err)
 	}
+	prefix := cfg.Prefix
+	if prefix == "" {
+		prefix = "/"
+	}
+	if !strings.HasPrefix(prefix, "/") {
+		return fmt.Errorf("web.static: prefix %q must start with /", prefix)
+	}
+	// A prefix names a mount subtree: "/assets" registers "/assets/"
+	// so every path below it is served (a bare pattern without a
+	// trailing slash would match only the exact path).
+	mount := prefix
+	if mount != "/" && !strings.HasSuffix(mount, "/") {
+		mount += "/"
+	}
 	s.Base.Build(ctx)
 	r := ctx.Get[*web.Router]()
 	if r == nil {
 		return errors.New("web.static: no web Router available (mount this component under a web node)")
 	}
-	r.Handle("", "/", handler(cfg.Dir, cfg.API, cfg.SPA))
+	r.Handle("", mount, handler(cfg.Dir, mount, cfg.API, cfg.SPA))
 	return nil
 }
 
-// handler serves files from dir; with SPA enabled it falls back to
-// index.html when the path does not resolve to a regular file, except
-// under apiPrefix where unmatched requests stay 404.
-func handler(dir, apiPrefix string, spa bool) http.Handler {
+// handler serves files from dir under the mount prefix; with SPA
+// enabled it falls back to index.html when the path does not resolve
+// to a regular file, except under apiPrefix where unmatched requests
+// stay 404.
+func handler(dir, mount, apiPrefix string, spa bool) http.Handler {
 	fs := http.FileServer(http.Dir(dir))
 	if !spa {
-		return fs
+		return http.StripPrefix(mount, fs)
 	}
 	root := http.Dir(dir)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := strings.TrimPrefix(r.URL.Path, "/")
+		p := strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, mount), "/")
 		if p != "" {
 			if f, err := root.Open(p); err == nil {
 				info, err := f.Stat()

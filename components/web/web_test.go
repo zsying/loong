@@ -25,6 +25,24 @@ func cfgNode(t *testing.T, s string) yaml.Node {
 	return *doc.Content[0]
 }
 
+// echoComp is a test business component registering one route on the
+// parent web Router, mirroring how account/static/biz components mount.
+type echoComp struct {
+	loong.Base
+}
+
+func (c *echoComp) Build(ctx *loong.Scope) error {
+	c.Base.Build(ctx)
+	if r := ctx.Get[*Router](); r != nil {
+		r.Get("/ping", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("pong")) })
+	}
+	return nil
+}
+
+func init() {
+	loong.RegisterComponent("test.echo", func() loong.Component { return &echoComp{} })
+}
+
 func getReq(t *testing.T, h http.Handler, method, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
 	var rdr io.Reader
@@ -195,6 +213,51 @@ func TestWebListenFailFast(t *testing.T) {
 	k := loong.New()
 	if err := k.Assemble(root); err == nil || !strings.Contains(err.Error(), "listen") {
 		t.Fatalf("Assemble with busy port = %v, want listen error", err)
+	}
+}
+
+// TestWebComponentRun covers the full channel lifecycle through a real
+// socket: assemble with listen 127.0.0.1:0, hit an endpoint registered
+// by a child component over HTTP, then shut down gracefully.
+func TestWebComponentRun(t *testing.T) {
+	root := &loong.Node{
+		Type: "base",
+		Children: []*loong.Node{
+			{Type: "web", ID: "main", Config: cfgNode(t, "listen: 127.0.0.1:0\n"), Children: []*loong.Node{
+				{Type: "test.echo", ID: "echo"},
+			}},
+		},
+	}
+	k := loong.New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = k.Shutdown() })
+
+	comp, err := k.Component("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := comp.(*Web).Addr()
+	if addr == nil {
+		t.Fatal("Addr() = nil, server did not bind")
+	}
+	resp, err := http.Get("http://" + addr.String() + "/ping")
+	if err != nil {
+		t.Fatalf("GET /ping: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != "pong" {
+		t.Errorf("GET /ping = %d %q, want 200 pong", resp.StatusCode, body)
+	}
+
+	// Graceful shutdown: after Stop the endpoint refuses connections.
+	if err := k.Shutdown(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := http.Get("http://" + addr.String() + "/ping"); err == nil {
+		t.Error("GET /ping after Shutdown succeeded, want connection error")
 	}
 }
 

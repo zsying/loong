@@ -25,7 +25,7 @@ func cfgNode(t *testing.T, s string) yaml.Node {
 
 // assemble mounts a web channel (not listening) with a web.static child
 // and returns the root Router for direct requests.
-func assemble(t *testing.T, dir, api string, spa bool) *web.Router {
+func assemble(t *testing.T, dir, prefix, api string, spa bool) *web.Router {
 	t.Helper()
 	spaY := "false"
 	if spa {
@@ -35,7 +35,7 @@ func assemble(t *testing.T, dir, api string, spa bool) *web.Router {
 		Type: "base",
 		Children: []*loong.Node{
 			{Type: "web", ID: "main", Config: cfgNode(t, "listen: \"\"\n"), Children: []*loong.Node{
-				{Type: "web.static", ID: "static", Config: cfgNode(t, "dir: "+strconv.Quote(dir)+"\nspa: "+spaY+"\napi: "+strconv.Quote(api)+"\n")},
+				{Type: "web.static", ID: "static", Config: cfgNode(t, "dir: "+strconv.Quote(dir)+"\nprefix: "+strconv.Quote(prefix)+"\nspa: "+spaY+"\napi: "+strconv.Quote(api)+"\n")},
 			}},
 		},
 	}
@@ -55,7 +55,7 @@ func TestStaticHosting(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hi"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r := assemble(t, dir, "", false)
+	r := assemble(t, dir, "", "", false)
 
 	if rec := get(t, r, "/hello.txt"); rec.Code != http.StatusOK || rec.Body.String() != "hi" {
 		t.Errorf("GET /hello.txt = %d %q", rec.Code, rec.Body.String())
@@ -65,12 +65,27 @@ func TestStaticHosting(t *testing.T) {
 	}
 }
 
+func TestStaticPrefixHosting(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "hello.txt"), []byte("hi"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := assemble(t, dir, "/assets", "", false)
+
+	if rec := get(t, r, "/assets/hello.txt"); rec.Code != http.StatusOK || rec.Body.String() != "hi" {
+		t.Errorf("GET /assets/hello.txt = %d %q", rec.Code, rec.Body.String())
+	}
+	if rec := get(t, r, "/hello.txt"); rec.Code != http.StatusNotFound {
+		t.Errorf("GET /hello.txt outside prefix = %d, want 404", rec.Code)
+	}
+}
+
 func TestStaticSPAFallback(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>app</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r := assemble(t, dir, "", true)
+	r := assemble(t, dir, "", "", true)
 
 	if rec := get(t, r, "/some/deep/route"); rec.Code != http.StatusOK || rec.Body.String() != "<html>app</html>" {
 		t.Errorf("SPA fallback = %d %q", rec.Code, rec.Body.String())
@@ -85,7 +100,7 @@ func TestStaticSPAApiNotMasked(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>app</html>"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r := assemble(t, dir, "/api", true)
+	r := assemble(t, dir, "", "/api", true)
 
 	// Unmatched API requests must stay 404 — the SPA fallback must not
 	// return index.html for them. The prefix is matched per segment:

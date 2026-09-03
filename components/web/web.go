@@ -37,6 +37,7 @@ type Web struct {
 	cfg    Config
 	router *Router
 	srv    *http.Server
+	ln     net.Listener
 }
 
 func (w *Web) Build(scope *loong.Scope) error {
@@ -75,13 +76,29 @@ func (w *Web) Run(*loong.Scope) error {
 	w.srv = &http.Server{
 		Handler:           w.router,
 		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		// ReadTimeout / WriteTimeout are deliberately unset: the
+		// channel must not assume a business response time (SSE,
+		// uploads, long polls are the business's choice). The two
+		// header/idle limits above only guard slow readers between
+		// requests and slowloris-style header stalls.
 	}
 	go func() {
 		if err := w.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("web server", "err", err)
 		}
 	}()
+	w.ln = ln
 	return nil
+}
+
+// Addr returns the bound listener address once Run has bound the
+// socket, nil otherwise — useful for tests and for resolving ":0".
+func (w *Web) Addr() net.Addr {
+	if w.ln == nil {
+		return nil
+	}
+	return w.ln.Addr()
 }
 
 // Stop gracefully shuts down the HTTP server with a 5s timeout.
