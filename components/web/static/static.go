@@ -78,9 +78,12 @@ func (s *Static) Build(ctx *loong.Scope) error {
 // to a regular file, except under apiPrefix where unmatched requests
 // stay 404.
 func handler(dir, mount, apiPrefix string, spa bool) http.Handler {
-	fs := http.FileServer(http.Dir(dir))
+	// Requests carry the mount prefix, files do not: "/assets/app.css"
+	// is "dir/app.css". Stripping once here keeps both the plain and
+	// the SPA branch consistent.
+	fs := http.StripPrefix(mount, http.FileServer(http.Dir(dir)))
 	if !spa {
-		return http.StripPrefix(mount, fs)
+		return fs
 	}
 	root := http.Dir(dir)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

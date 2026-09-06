@@ -95,6 +95,33 @@ func TestStaticSPAFallback(t *testing.T) {
 	}
 }
 
+// TestStaticPrefixSPA covers the prefix + SPA combination: real files
+// below the mount are served (the prefix must not stay attached to the
+// lookup path) while unknown routes still fall back to index.html.
+func TestStaticPrefixSPA(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>app</html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "js"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "js", "app.js"), []byte("console.log(1)"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r := assemble(t, dir, "/app", "", true)
+
+	if rec := get(t, r, "/app/js/app.js"); rec.Code != http.StatusOK || rec.Body.String() != "console.log(1)" {
+		t.Errorf("GET /app/js/app.js = %d %q, want 200 with the file", rec.Code, rec.Body.String())
+	}
+	if rec := get(t, r, "/app/deep/route"); rec.Code != http.StatusOK || rec.Body.String() != "<html>app</html>" {
+		t.Errorf("GET /app/deep/route = %d %q, want 200 index.html", rec.Code, rec.Body.String())
+	}
+	if rec := get(t, r, "/js/app.js"); rec.Code != http.StatusNotFound {
+		t.Errorf("GET /js/app.js outside the prefix = %d, want 404", rec.Code)
+	}
+}
+
 func TestStaticSPAApiNotMasked(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html>app</html>"), 0o644); err != nil {
