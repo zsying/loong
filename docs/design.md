@@ -218,11 +218,12 @@ CLI 应用与常驻渠道共用同一心智：**父组件定义其子节点的�
 
 web 组件定位为**纯 HTTP 通道**：server 生命周期（listen / 优雅关停 / 超时）+ 一个注册面服务 `*web.Router`。会话、账号 API、静态托管、业务端点一律是挂到 web 下的组件——配置树声明即装配，与 cli 家族（总控 + 可选命令）同一心智：
 
-- **`web`（`components/web`）**：Config 只含 `listen`（`log: false` 可关请求日志）。**不 import user/auth、不订阅业务事件**；默认中间件 Recover（panic → 500）+ 请求日志（Debug）。
+- **`web`（`components/web`）**：Config 只含 `listen`（`log: false` 可关请求日志）。**不 import user/auth、不订阅业务事件**；默认中间件 Recover（panic → 500）+ 请求日志（Debug）。RequestLog 注册在前、Recover 在内，所以日志能记到 Recover 转换后的最终状态码。
+- **中间件（stdlib 签名，可选组合）**：`Recover`（panic → 500，重抛 `http.ErrAbortHandler`）、`RequestLog`（method / path / status / duration）、`CORS(cfg)`（origin 白名单、预检 204、credentials、`Vary: Origin`；**不默认启用**——谁能跨域调这个 API 是业务决策，由组件 `r.Use(web.CORS(cfg))` 自选）。**响应 wrapper 必须透明**：记录状态的中间件用 `responseRecorder` 包裹 writer，它必须转发 `Flush` / `Hijack` 并提供 `Unwrap`，否则 SSE、分块下载与 WebSocket 升级会被静默掐断——只嵌入 `http.ResponseWriter` 会让这些可选接口从方法集里消失。
 - **注册面 `*web.Router`（服务）**：`Handle` / `Get` / `Post` / `Put` / `Patch` / `Delete`、`Group(prefix, mws...)`（前缀 + 组中间件，如 `/admin` + Guard）、`Use`（全局中间件）、`ServeHTTP`（可直接测试）。底层是 stdlib ServeMux（Go 1.22 方法+路径），中间件类型 = `func(http.Handler) http.Handler`，net/http 生态全兼容；附带 `WriteJSON` / `ReadJSON` 助手。业务组件注册端点不再接触 mux。规则：root 的 `Use` 中间件是 server 级（ServeHTTP 统一应用一次），Group 只继承父 group 的注册级中间件；同一 method+path 重复注册 = 装配期 panic（视为路由冲突错误）。
 - **`auth`（`components/auth`，跨渠道可复用）**：Config{secret, ttl}；服务 `Issue(sub)` / `Guard(next)` / 包级 `Identity(r)`；只依赖 net/http + golang-jwt，不认识 web/user。
 - **`web.account`（可选）**：标准账号 API register / login / me，编排 `user.Service` + `auth.Service`，挂到 web 下即用；不需要标准密码登录就不挂。
-- **`web.static`（可选）**：Config{dir, prefix?="/", spa, api?}，向父 Router 注册前缀挂载静态树（spa 时未命中文件回退 index.html；`api: /api` 前缀的未命中路径保持 404，SPA fallback 不遮蔽 API 路由）。
+- **`web.static`（可选）**：Config{dir, prefix?="/", spa, api?}，向父 Router 注册前缀挂载静态树。URL 带 prefix、磁盘上的文件不带，所以文件查找前统一 strip（`prefix` + `spa` 组合同样生效，不能只在非 spa 分支裁剪）；spa 时未命中文件回退 index.html；`api: /api` 前缀的未命中路径保持 404，SPA fallback 不遮蔽 API 路由。
 
 装配示例（API 后端 + 静态站 + 账号）：
 
