@@ -48,9 +48,10 @@ func (w *Web) Build(scope *loong.Scope) error {
 	w.Base.Build(scope)
 	w.cfg = cfg
 	w.router = NewRouter()
-	// RequestLog first so it wraps Recover and reports the final
-	// status (including recovered panics), Recover outermost in
-	// effect for panics in the chain below it.
+	// RequestLog is registered first so it wraps Recover and reports
+	// the final status — including the 500 a recovered panic turns
+	// into. Recover sits inside it and catches panics from the
+	// handlers below.
 	w.router.Use(RequestLog())
 	w.router.Use(Recover())
 	return nil

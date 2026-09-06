@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -144,6 +145,81 @@ func TestRecoverMiddleware(t *testing.T) {
 	}
 	if rec := getReq(t, r, http.MethodGet, "/ok", nil); rec.Code != 200 {
 		t.Errorf("ok = %d, want 200", rec.Code)
+	}
+}
+
+// TestMiddlewareKeepsStreaming pins that the Recover/RequestLog
+// wrappers stay transparent: handlers must still be able to flush
+// (SSE, chunked downloads) and to hijack the connection (WebSocket).
+func TestMiddlewareKeepsStreaming(t *testing.T) {
+	r := NewRouter()
+	r.Use(RequestLog(), Recover())
+	r.Get("/stream", func(w http.ResponseWriter, _ *http.Request) {
+		f, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, "no flusher", http.StatusInternalServerError)
+			return
+		}
+		_, _ = w.Write([]byte("a"))
+		f.Flush()
+		_, _ = w.Write([]byte("b"))
+	})
+	rec := getReq(t, r, http.MethodGet, "/stream", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /stream = %d", rec.Code)
+	}
+	if rec.Body.String() != "ab" {
+		t.Errorf("body = %q, want ab", rec.Body.String())
+	}
+	if !rec.Flushed {
+		t.Error("handler flushed but the middleware dropped it")
+	}
+}
+
+// TestMiddlewareKeepsHijack runs the upgrade on a real server, since
+// only a real connection supports hijacking.
+func TestMiddlewareKeepsHijack(t *testing.T) {
+	r := NewRouter()
+	r.Use(RequestLog(), Recover())
+	done := make(chan error, 1)
+	r.Get("/upgrade", func(w http.ResponseWriter, _ *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			done <- errors.New("no hijacker")
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			done <- err
+			return
+		}
+		defer conn.Close()
+		_, _ = buf.WriteString("HTTP/1.1 101 Switching Protocols\r\n\r\n")
+		_ = buf.Flush()
+		done <- nil
+	})
+	srv := httptest.NewServer(r)
+	defer srv.Close()
+
+	c, err := net.Dial("tcp", srv.Listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	if _, err := c.Write([]byte("GET /upgrade HTTP/1.1\r\nHost: x\r\n\r\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("hijack through middleware: %v", err)
+	}
+}
+
+func TestRecorderUnwrap(t *testing.T) {
+	inner := httptest.NewRecorder()
+	wrapped := &responseRecorder{ResponseWriter: inner}
+	if got := wrapped.Unwrap(); got != http.ResponseWriter(inner) {
+		t.Fatalf("Unwrap = %v, want the wrapped writer", got)
 	}
 }
 

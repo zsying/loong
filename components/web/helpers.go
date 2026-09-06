@@ -1,8 +1,11 @@
 package web
 
 import (
+	"bufio"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 )
@@ -61,11 +64,47 @@ func RequestLog() Middleware {
 }
 
 // responseRecorder records whether and with which status the handler
-// wrote, so middlewares can observe the response.
+// wrote, so middlewares can observe the response. It must stay a
+// transparent wrapper: Flush and Hijack are forwarded to the
+// underlying writer and Unwrap exposes it, so streaming (SSE, chunked
+// downloads) and protocol upgrades (WebSocket) keep working through
+// Recover and RequestLog — a wrapper that only embeds the interface
+// would silently drop those optional behaviours.
 type responseRecorder struct {
 	http.ResponseWriter
 	status int
 	wrote  bool
+}
+
+// The recorder satisfies the optional writer interfaces unconditionally
+// so handlers and libraries can assert on them; the calls forward to
+// the underlying writer (see Unwrap).
+var (
+	_ http.Flusher  = (*responseRecorder)(nil)
+	_ http.Hijacker = (*responseRecorder)(nil)
+)
+
+// Unwrap returns the wrapped writer, so http.ResponseController and
+// interface assertions reach the real implementation instead of the
+// recorder (Go 1.20+ standard for transparent wrappers).
+func (w *responseRecorder) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// Flush forwards to the underlying writer when it supports flushing;
+// without it every SSE stream would buffer until the handler returns.
+func (w *responseRecorder) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// Hijack forwards to the underlying writer when it supports hijacking
+// (a real server does), so upgrades such as WebSocket still work.
+func (w *responseRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, errors.New("web: hijack not supported by the underlying writer")
+	}
+	return h.Hijack()
 }
 
 func (w *responseRecorder) WriteHeader(code int) {
