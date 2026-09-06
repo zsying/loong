@@ -10,6 +10,7 @@ package web
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -25,9 +26,20 @@ import (
 // in the child components that provide them.
 type Config struct {
 	Listen string `yaml:"listen"`
+	// TLS turns the listener into HTTPS. It is optional: an absent
+	// block serves plain HTTP, so a project behind a reverse proxy
+	// (or on a trusted network) never has to think about it.
+	TLS *TLS `yaml:"tls,omitempty"`
 	// Log enables per-request logging (default on, set false to turn
 	// off). nil means on, so the zero Config still logs.
 	Log *bool `yaml:"log,omitempty"`
+}
+
+// TLS holds the certificate files for HTTPS. Both are required
+// whenever the block is present.
+type TLS struct {
+	Cert string `yaml:"cert"`
+	Key  string `yaml:"key"`
 }
 
 // Web is the web channel component: it owns the Router, starts the HTTP
@@ -63,6 +75,12 @@ func (w *Web) Build(scope *loong.Scope) error {
 // (Run returns the error and already-built nodes are stopped) instead
 // of silently running a dead server.
 func (w *Web) Run(*loong.Scope) error {
+	// Route conflicts surface as assembly errors: the stdlib mux
+	// panics on a duplicate pattern, which would take the whole
+	// process down instead of failing the component.
+	if err := w.router.Err(); err != nil {
+		return err
+	}
 	if w.cfg.Listen == "" {
 		return nil
 	}
@@ -70,7 +88,11 @@ func (w *Web) Run(*loong.Scope) error {
 	if err != nil {
 		return fmt.Errorf("web: listen %s: %w", w.cfg.Listen, err)
 	}
-	slog.Info("web listening", "addr", ln.Addr().String())
+	if w.cfg.TLS != nil {
+		slog.Info("web listening (https)", "addr", ln.Addr().String())
+	} else {
+		slog.Info("web listening", "addr", ln.Addr().String())
+	}
 	for _, rt := range w.router.Routes() {
 		slog.Info("web route", "method", routeMethod(rt.Method), "path", rt.Path)
 	}
@@ -84,8 +106,30 @@ func (w *Web) Run(*loong.Scope) error {
 		// header/idle limits above only guard slow readers between
 		// requests and slowloris-style header stalls.
 	}
+	// Load the certificate pair here, not inside ServeTLS: a missing
+	// or broken file must fail assembly rather than leave a listener
+	// that silently serves nothing.
+	if w.cfg.TLS != nil {
+		if w.cfg.TLS.Cert == "" || w.cfg.TLS.Key == "" {
+			_ = ln.Close()
+			return errors.New("web: tls requires both cert and key")
+		}
+		cert, err := tls.LoadX509KeyPair(w.cfg.TLS.Cert, w.cfg.TLS.Key)
+		if err != nil {
+			_ = ln.Close()
+			return fmt.Errorf("web: tls: %w", err)
+		}
+		w.srv.TLSConfig = &tls.Config{Certificates: []tls.Certificate{cert}}
+	}
 	go func() {
-		if err := w.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		var err error
+		if w.srv.TLSConfig != nil {
+			// The pair is already loaded, so ServeTLS only serves.
+			err = w.srv.ServeTLS(ln, "", "")
+		} else {
+			err = w.srv.Serve(ln)
+		}
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			slog.Error("web server", "err", err)
 		}
 	}()

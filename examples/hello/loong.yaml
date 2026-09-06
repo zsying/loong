@@ -19,6 +19,8 @@ children:
     id: main
     config:
       listen: ":8080"
+      # optional HTTPS — omit for plain HTTP:
+      # tls: { cert: ./cert.pem, key: ./key.pem }
     children:
       # account API (register / login / me) — mount only when the
       # standard password login is wanted.

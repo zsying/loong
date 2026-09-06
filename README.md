@@ -21,7 +21,7 @@ Every new software project starts by re-implementing the same parts: login, conf
 - **Lazy activation** — activation is one rule: nodes are built at startup unless marked `lazy: true` in the config tree; lazy nodes (and service lookups that hit an inactive provider) are activated on first use.
 - **Component catalog** — `loong.Components()` lists every registered type with its description, services, activation mode and emitted events, so consumers can discover and wire components without reading source.
 - **Single-process monolith** — the whole tree runs in one process; simple to debug, zero network overhead between components.
-- **Zero-framework web channel** — stdlib `net/http` (Go 1.22 routing patterns) behind a friendly `*web.Router` registration surface; sessions (`auth`), account API (`web.account`) and static hosting (`web.static`) are separate optional components. Middleware is plain `func(http.Handler) http.Handler`: `Recover`, request logging and CORS ship with the channel, and the wrappers stay transparent so streaming (SSE) and protocol upgrades (WebSocket) still work.
+- **Zero-framework web channel** — stdlib `net/http` (Go 1.22 routing patterns) behind a friendly `*web.Router` registration surface; sessions (`auth`), account API (`web.account`) and static hosting (`web.static`) are separate optional components. Middleware is plain `func(http.Handler) http.Handler`: `Recover`, request logging and CORS ship with the channel, and the wrappers stay transparent so streaming (SSE) and protocol upgrades (WebSocket) still work. HTTPS is opt-in via a `tls: {cert, key}` block; route conflicts fail assembly instead of panicking.
 
 ## Repository layout
 

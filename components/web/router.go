@@ -1,6 +1,10 @@
 package web
 
-import "net/http"
+import (
+	"fmt"
+	"net/http"
+	"strings"
+)
 
 // Middleware wraps a handler, net/http style. The type stays stdlib
 // compatible so the whole net/http middleware ecosystem plugs in.
@@ -30,14 +34,23 @@ type Router struct {
 	prefix string
 	mws    []Middleware // server-wide (root) or registration wrap (groups)
 	root   bool
-	routes *[]Route // registration log, shared by root and its groups
+	reg    *registry // shared by the root and all its groups
+}
+
+// registry is the shared registration state of a root router and every
+// group below it: the route log plus the patterns already taken, so a
+// duplicate or malformed registration is reported as an error instead
+// of panicking inside the stdlib mux.
+type registry struct {
+	routes []Route
+	taken  map[string]bool
+	err    error // first registration error, kept for Err
 }
 
 // NewRouter creates an empty root Router. The web component builds one
 // in its own Build; standalone creation supports tests and embedding.
 func NewRouter() *Router {
-	routes := &[]Route{}
-	return &Router{mux: http.NewServeMux(), root: true, routes: routes}
+	return &Router{mux: http.NewServeMux(), root: true, reg: &registry{taken: map[string]bool{}}}
 }
 
 // Handle registers h for the given method and path (e.g. "GET",
@@ -73,7 +86,7 @@ func (r *Router) Use(mws ...Middleware) { r.mws = append(r.mws, mws...) }
 // the root and are applied by ServeHTTP for every request — they are
 // never copied into groups, or group routes would run them twice.
 func (r *Router) Group(prefix string, mws ...Middleware) *Router {
-	g := &Router{mux: r.mux, prefix: r.prefix + prefix, routes: r.routes}
+	g := &Router{mux: r.mux, prefix: r.prefix + prefix, reg: r.reg}
 	if !r.root {
 		g.mws = append(g.mws, r.mws...)
 	}
@@ -96,23 +109,52 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // (groups already expanded into full paths). The web channel prints
 // them at startup so an app's effective surface is visible at a glance.
 func (r *Router) Routes() []Route {
-	return append([]Route(nil), (*r.routes)...)
+	return append([]Route(nil), r.reg.routes...)
 }
+
+// Err reports the first registration error, if any: registering the
+// same method and path twice, or a path that is not rooted at "/".
+// Registration never panics — the caller (the web channel, which fails
+// assembly on Err) decides what a conflict means.
+func (r *Router) Err() error { return r.reg.err }
 
 // register mounts one handler on the shared mux. Group middlewares are
 // applied at registration time so each handler carries exactly the
 // guards of the groups it was registered through; root middlewares are
 // applied by ServeHTTP instead.
 func (r *Router) register(method, path string, h http.Handler) {
+	// Keep the first error: one conflict is enough to fail assembly,
+	// and continuing would only pile on noise.
+	if r.reg.err != nil {
+		return
+	}
+	if !strings.HasPrefix(path, "/") {
+		r.setErr(fmt.Errorf("web: route path %q must start with /", path))
+		return
+	}
+	full := r.prefix + path
+	key := method + " " + full
+	if r.reg.taken[key] {
+		r.setErr(fmt.Errorf("web: route %s %s registered twice", routeMethod(method), full))
+		return
+	}
+	r.reg.taken[key] = true
+
 	if !r.root {
 		for i := len(r.mws) - 1; i >= 0; i-- {
 			h = r.mws[i](h)
 		}
 	}
-	pattern := r.prefix + path
+	pattern := full
 	if method != "" {
-		pattern = method + " " + pattern
+		pattern = method + " " + full
 	}
-	*r.routes = append(*r.routes, Route{Method: method, Path: r.prefix + path})
+	r.reg.routes = append(r.reg.routes, Route{Method: method, Path: full})
 	r.mux.Handle(pattern, h)
+}
+
+func (r *Router) setErr(err error) {
+	if r.reg.err == nil {
+		r.reg.err = err
+	}
 }

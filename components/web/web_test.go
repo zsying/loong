@@ -2,15 +2,26 @@ package web
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -362,5 +373,155 @@ func TestJSONHelpers(t *testing.T) {
 	}
 	if rec := getReq(t, r, http.MethodPost, "/echo", "not-json"); rec.Code != http.StatusBadRequest {
 		t.Errorf("bad json = %d, want 400", rec.Code)
+	}
+}
+
+func TestRouterRegistrationErrors(t *testing.T) {
+	noop := func(http.ResponseWriter, *http.Request) {}
+
+	// The same method and path twice is a conflict, not a mux panic.
+	r := NewRouter()
+	r.Get("/dup", noop)
+	r.Get("/dup", noop)
+	if err := r.Err(); err == nil || !strings.Contains(err.Error(), "twice") {
+		t.Fatalf("duplicate route Err = %v, want a conflict error", err)
+	}
+	// Groups share the registry with their root, so the same endpoint
+	// reached two ways still clashes.
+	r2 := NewRouter()
+	r2.Group("/api").Get("/x", noop)
+	r2.Get("/api/x", noop)
+	if err := r2.Err(); err == nil {
+		t.Error("route registered in a group and on the root = nil, want conflict")
+	}
+	// Paths must be rooted — a missing "/" is the usual typo.
+	r3 := NewRouter()
+	r3.Get("api/x", noop)
+	if err := r3.Err(); err == nil || !strings.Contains(err.Error(), "must start with /") {
+		t.Errorf("unrooted path Err = %v, want a path error", err)
+	}
+	// Distinct registrations are fine: same path, other method, plus a
+	// catch-all on the root.
+	r4 := NewRouter()
+	r4.Get("/x", noop)
+	r4.Post("/x", noop)
+	r4.Handle("", "/", http.HandlerFunc(noop))
+	if err := r4.Err(); err != nil {
+		t.Errorf("distinct registrations Err = %v, want nil", err)
+	}
+	if got := len(r4.Routes()); got != 3 {
+		t.Errorf("Routes = %d entries, want 3", got)
+	}
+}
+
+// TestWebRouteConflictFailsAssembly pins that a duplicate route fails
+// assembly instead of panicking inside the stdlib mux.
+func TestWebRouteConflictFailsAssembly(t *testing.T) {
+	root := &loong.Node{
+		Type: "base",
+		Children: []*loong.Node{
+			{Type: "web", ID: "main", Config: cfgNode(t, "listen: 127.0.0.1:0\n"), Children: []*loong.Node{
+				{Type: "test.echo", ID: "a"},
+				{Type: "test.echo", ID: "b"}, // both register /ping
+			}},
+		},
+	}
+	k := loong.New()
+	err := k.Assemble(root)
+	if err == nil || !strings.Contains(err.Error(), "twice") {
+		t.Fatalf("Assemble with duplicate routes = %v, want a conflict error", err)
+	}
+}
+
+// selfSignedCert writes a throwaway certificate for the TLS test and
+// returns the cert and key paths.
+func selfSignedCert(t *testing.T, dir string) (string, string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "localhost"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:     []string{"localhost"},
+		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certPath := filepath.Join(dir, "cert.pem")
+	keyPath := filepath.Join(dir, "key.pem")
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+	if err := os.WriteFile(certPath, certPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return certPath, keyPath
+}
+
+// TestWebTLS serves HTTPS end to end with a throwaway certificate.
+func TestWebTLS(t *testing.T) {
+	dir := t.TempDir()
+	cert, key := selfSignedCert(t, dir)
+	root := &loong.Node{
+		Type: "base",
+		Children: []*loong.Node{
+			{Type: "web", ID: "main", Config: cfgNode(t, "listen: 127.0.0.1:0\ntls:\n  cert: "+strconv.Quote(cert)+"\n  key: "+strconv.Quote(key)+"\n"), Children: []*loong.Node{
+				{Type: "test.echo", ID: "echo"},
+			}},
+		},
+	}
+	k := loong.New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = k.Shutdown() })
+	comp, err := k.Component("main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := comp.(*Web).Addr().String()
+
+	client := &http.Client{Transport: &http.Transport{
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // test-only self-signed cert
+	}}
+	resp, err := client.Get("https://" + addr + "/ping")
+	if err != nil {
+		t.Fatalf("https GET /ping: %v", err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK || string(body) != "pong" {
+		t.Errorf("https GET /ping = %d %q, want 200 pong", resp.StatusCode, body)
+	}
+}
+
+// TestWebTLSBadCertFails keeps the certificate error in assembly: a
+// broken path must not leave a listener that serves nothing.
+func TestWebTLSBadCertFails(t *testing.T) {
+	dir := t.TempDir()
+	root := &loong.Node{
+		Type: "base",
+		Children: []*loong.Node{
+			{Type: "web", ID: "main", Config: cfgNode(t, "listen: 127.0.0.1:0\ntls:\n  cert: "+strconv.Quote(filepath.Join(dir, "missing.pem"))+"\n  key: "+strconv.Quote(filepath.Join(dir, "missing.key"))+"\n")},
+		},
+	}
+	k := loong.New()
+	err := k.Assemble(root)
+	if err == nil || !strings.Contains(err.Error(), "tls") {
+		t.Fatalf("Assemble with a missing certificate = %v, want a tls error", err)
 	}
 }
