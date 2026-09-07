@@ -175,7 +175,8 @@ children:
 ## Documentation
 
 - [Design document](docs/design.md) — architecture, component tree, config schema, event protocol, lifecycle and roadmap.
+- [Changelog](CHANGELOG.md) — what changed in each release.
 
 ## Status
 
-v0.1 — kernel, log/user/web components and a working sample. Wechat channels, TUI and extension components (mail, unionid bridging, ...) are on the roadmap.
+v0.1.0 — the component-tree kernel with log, user, auth, web and cli components, plus two working samples. Wechat channels, TUI and extension components (mail, unionid bridging, ...) are on the roadmap. Requires Go 1.27.
