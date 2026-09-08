@@ -4,6 +4,24 @@ import (
 	"testing"
 )
 
+// The activation tests share one registration of actProv/actConsumer
+// (RegisterComponent panics on duplicate type names, mirroring
+// database/sql.Register), with per-test counters reset before each run.
+var actCounters struct{ builds, runs, stops int }
+
+func init() {
+	RegisterComponent("test.actprov", func() Component {
+		return &actProv{builds: &actCounters.builds, runs: &actCounters.runs, stops: &actCounters.stops}
+	}, WithService(func(c Component) *actSvc { return c.(*actProv).v }))
+	RegisterComponent("test.actconsumer", func() Component {
+		return &actConsumer{}
+	})
+}
+
+func resetActCounters() {
+	actCounters.builds, actCounters.runs, actCounters.stops = 0, 0, 0
+}
+
 // actSvc is the service value exposed by actProv. Its own type keeps it
 // from colliding with any service type declared by other tests.
 type actSvc struct{ n int }
@@ -58,13 +76,8 @@ func (c *actConsumer) Build(ctx *Scope) error {
 // non-lazy provider declared later in the tree. The provider must be
 // Built and Run exactly once across the whole assembly.
 func TestNonLazyProviderActivatedOnce(t *testing.T) {
-	var provBuilds, provRuns, provStops int
-	RegisterComponent("test.actprov", func() Component {
-		return &actProv{builds: &provBuilds, runs: &provRuns, stops: &provStops}
-	}, WithService(func(c Component) *actSvc { return c.(*actProv).v }))
-	RegisterComponent("test.actconsumer", func() Component {
-		return &actConsumer{}
-	})
+	resetActCounters()
+	provBuilds, provRuns, provStops := &actCounters.builds, &actCounters.runs, &actCounters.stops
 
 	root := &Node{
 		Type: "base", ID: "root",
@@ -87,10 +100,10 @@ func TestNonLazyProviderActivatedOnce(t *testing.T) {
 
 	// The provider must be Built and Run exactly once. With the bug these
 	// counters are 2 (a second instance is created and wired/started).
-	if provBuilds != 1 {
+	if *provBuilds != 1 {
 		t.Fatalf("provider Build ran %d times, want exactly 1", provBuilds)
 	}
-	if provRuns != 1 {
+	if *provRuns != 1 {
 		t.Fatalf("provider Run ran %d times, want exactly 1", provRuns)
 	}
 
@@ -98,7 +111,7 @@ func TestNonLazyProviderActivatedOnce(t *testing.T) {
 	if err := k.Shutdown(); err != nil {
 		t.Fatal(err)
 	}
-	if provStops != 1 {
+	if *provStops != 1 {
 		t.Fatalf("provider Stop ran %d times, want exactly 1", provStops)
 	}
 }
@@ -108,13 +121,8 @@ func TestNonLazyProviderActivatedOnce(t *testing.T) {
 // happens during the consumer's Build (the provider is already active),
 // so this sanity-checks that the fix does not over-skip nodes.
 func TestNonLazyProviderDeclaredBeforeConsumer(t *testing.T) {
-	var provBuilds, provRuns, provStops int
-	RegisterComponent("test.actprov", func() Component {
-		return &actProv{builds: &provBuilds, runs: &provRuns, stops: &provStops}
-	}, WithService(func(c Component) *actSvc { return c.(*actProv).v }))
-	RegisterComponent("test.actconsumer", func() Component {
-		return &actConsumer{}
-	})
+	resetActCounters()
+	provBuilds, provRuns, provStops := &actCounters.builds, &actCounters.runs, &actCounters.stops
 
 	root := &Node{
 		Type: "base", ID: "root",
@@ -131,13 +139,13 @@ func TestNonLazyProviderDeclaredBeforeConsumer(t *testing.T) {
 	if cons.got == nil || cons.gotErr != nil {
 		t.Fatalf("consumer did not resolve service: got=%+v err=%v", cons.got, cons.gotErr)
 	}
-	if provBuilds != 1 || provRuns != 1 {
+	if *provBuilds != 1 || *provRuns != 1 {
 		t.Fatalf("provider lifecycles: builds=%d runs=%d, want 1/1", provBuilds, provRuns)
 	}
 	if err := k.Shutdown(); err != nil {
 		t.Fatal(err)
 	}
-	if provStops != 1 {
+	if *provStops != 1 {
 		t.Fatalf("provider Stop ran %d times, want exactly 1", provStops)
 	}
 }

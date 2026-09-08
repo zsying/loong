@@ -86,7 +86,14 @@ func WithDesc(desc string) ComponentOption {
 // name found in the config tree. Optional ComponentOptions declare
 // services (WithService), the config struct (WithConfig), emitted
 // events (WithEvents) and a description (WithDesc).
+//
+// It panics on a duplicate type name, mirroring database/sql.Register
+// and flag: a silent overwrite would make the config tree resolve to
+// whichever init() happened to run last.
 func RegisterComponent(typeName string, factory func() Component, opts ...ComponentOption) {
+	if _, ok := factories[typeName]; ok {
+		panic("loong: component type already registered: " + typeName)
+	}
 	e := regEntry{factory: factory}
 	for _, o := range opts {
 		o(&e)

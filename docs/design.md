@@ -284,6 +284,10 @@ children:
 - 遵守 build / run / stop 三阶段生命周期；Stop 里释放自己持有的资源（server / db / flush）。
 - 不直接持有父节点 / 兄弟节点引用。
 - **服务缺失即报错，不静默**：`Get` 无提供者 / 歧义时返回零值，组件应显式校验并返回错误（web.account / web.static / hello greet 先例），避免"挂错父节点、能力没注册但进程照跑"的排查黑洞。
+- **Scope 与 context.Context 的边界**：`Scope` 服务生命周期与装配期（服务查找、子节点激活、本节点 config），它的有效期 = 节点生命周期；`context.Context` 负责 I/O 取消与超时（网络请求、子进程、外部调用）。规则：
+  - 组件间协作（找服务、取配置、发事件）只走 `Scope`，不要把 `context.Context` 当依赖容器用（SetValues 传服务是反模式）。
+  - `Run` 里启动的 goroutine 若做 I/O，自建 `context.WithCancel(context.Background())` 并把 cancel 存实例字段，`Stop` 里调用——组件不做跨阶段的 context 透传（树的生命周期由 Kernel 管理，不寄生在某个 ctx 上）。
+  - 参考：owlet `channel.Bridge.Start(ctx)/Stop`、`web` 组件的 5s 优雅关停均遵循此边界。
 - **业务扩展 = 项目组件**：业务能力的扩展同样以项目组件形式实现（业务项目里定义组件类型 + init() 注册 + 配置树挂载），与平台组件共用同一套机制——平台不预设业务，能力以组件插拔。
 
 ## 7. v0.1 范围

@@ -36,7 +36,7 @@ func (s *spy) Stop(ctx *Scope) error  { s.r.record("stop:" + ctx.Node.ID); retur
 
 func TestLifecycleOrder(t *testing.T) {
 	var r recorder
-	RegisterComponent("test.spy", func() Component { return &spy{r: &r} })
+	registerForTest("test.spy", func() Component { return &spy{r: &r} })
 	root := &Node{
 		Type: "test.spy", ID: "root",
 		Children: []*Node{
@@ -88,8 +88,8 @@ func (c *eventChild) Run(ctx *Scope) error {
 
 func TestEventRouting(t *testing.T) {
 	var got string
-	RegisterComponent("test.parent", func() Component { return &eventParent{got: &got} })
-	RegisterComponent("test.child", func() Component { return &eventChild{} })
+	registerForTest("test.parent", func() Component { return &eventParent{got: &got} })
+	registerForTest("test.child", func() Component { return &eventChild{} })
 	root := &Node{
 		Type: "test.parent", ID: "parent",
 		Children: []*Node{{Type: "test.child", ID: "child"}},
@@ -130,8 +130,8 @@ func (c *typedChild) Run(ctx *Scope) error {
 }
 
 func TestOnTyped(t *testing.T) {
-	RegisterComponent("test.tparent", func() Component { return &typedParent{} })
-	RegisterComponent("test.tchild", func() Component { return &typedChild{payload: "hi"} })
+	registerForTest("test.tparent", func() Component { return &typedParent{} })
+	registerForTest("test.tchild", func() Component { return &typedChild{payload: "hi"} })
 
 	// Matching payload type: handler receives the typed value.
 	k := New()
@@ -148,7 +148,7 @@ func TestOnTyped(t *testing.T) {
 
 	// Mismatched payload type: the wrapped handler error surfaces
 	// through Emit during Run.
-	RegisterComponent("test.tbad", func() Component { return &typedChild{payload: 42} })
+	registerForTest("test.tbad", func() Component { return &typedChild{payload: 42} })
 	k2 := New()
 	root2 := &Node{
 		Type: "test.tparent", ID: "p2",
@@ -187,7 +187,7 @@ func TestParse(t *testing.T) {
 // serves as a no-op root: it assembles with children and runs without
 // any custom component declaration.
 func TestBaseContainer(t *testing.T) {
-	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	registerForTest("test.spy", func() Component { return &spy{r: &recorder{}} })
 	root := &Node{
 		Type: "base", ID: "root",
 		Children: []*Node{{Type: "test.spy", ID: "child", Lazy: true}},
@@ -217,8 +217,8 @@ func (b *buildFail) Build(*Scope) error { return errors.New("boom") }
 
 func TestAssembleFailureCleanup(t *testing.T) {
 	var r recorder
-	RegisterComponent("test.failcleanup", func() Component { return &spy{r: &r} })
-	RegisterComponent("test.failboom", func() Component { return &buildFail{} })
+	registerForTest("test.failcleanup", func() Component { return &spy{r: &r} })
+	registerForTest("test.failboom", func() Component { return &buildFail{} })
 	root := &Node{
 		Type: "test.failcleanup", ID: "p",
 		Children: []*Node{
@@ -275,9 +275,9 @@ func (s *svcProvider) Build(ctx *Scope) error {
 }
 
 func TestServiceLazyActivation(t *testing.T) {
-	RegisterComponent("test.svc", func() Component { return &svcProvider{} },
+	registerForTest("test.svc", func() Component { return &svcProvider{} },
 		WithService(func(c Component) *svcValue { return c.(*svcProvider).v }))
-	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	registerForTest("test.spy", func() Component { return &spy{r: &recorder{}} })
 
 	// A service component without a lazy marker activates at assembly.
 	root := &Node{
@@ -337,9 +337,9 @@ func (u *svcUser) Build(ctx *Scope) error {
 }
 
 func TestServiceActivatedDuringParentBuild(t *testing.T) {
-	RegisterComponent("test.svc", func() Component { return &svcProvider{} },
+	registerForTest("test.svc", func() Component { return &svcProvider{} },
 		WithService(func(c Component) *svcValue { return c.(*svcProvider).v }))
-	RegisterComponent("test.svcuser", func() Component { return &svcUser{} })
+	registerForTest("test.svcuser", func() Component { return &svcUser{} })
 	root := &Node{
 		Type: "test.svcuser", ID: "root",
 		Children: []*Node{{Type: "test.svc", ID: "users"}},
@@ -364,8 +364,8 @@ func (l *lazyComp) Build(*Scope) error { *l.builds++; return nil }
 
 func TestLazyNodeActivatedOnDemand(t *testing.T) {
 	var builds int
-	RegisterComponent("test.lazy", func() Component { return &lazyComp{builds: &builds} })
-	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	registerForTest("test.lazy", func() Component { return &lazyComp{builds: &builds} })
+	registerForTest("test.spy", func() Component { return &spy{r: &recorder{}} })
 	root := &Node{
 		Type: "test.spy", ID: "root",
 		Children: []*Node{{Type: "test.lazy", ID: "opt", Lazy: true}},
@@ -412,9 +412,9 @@ type nilProvider struct {
 func (n *nilProvider) Build(*Scope) error { return nil }
 
 func TestNilService(t *testing.T) {
-	RegisterComponent("test.nil", func() Component { return &nilProvider{} },
+	registerForTest("test.nil", func() Component { return &nilProvider{} },
 		WithService(func(c Component) *nilSvc { return nil }))
-	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	registerForTest("test.spy", func() Component { return &spy{r: &recorder{}} })
 
 	// A service component activates during assembly, so a nil accessor
 	// surfaces at startup.
@@ -468,7 +468,7 @@ children:
 	}
 
 	var r recorder
-	RegisterComponent("test.spy", func() Component { return &spy{r: &r} })
+	registerForTest("test.spy", func() Component { return &spy{r: &r} })
 	k := New()
 	if err := k.Assemble(root); err != nil {
 		t.Fatal(err)
@@ -505,9 +505,9 @@ func TestGetUnknownService(t *testing.T) {
 // goroutines: the per-node activation mutex must yield exactly one
 // instance that all callers share.
 func TestServiceConcurrentActivation(t *testing.T) {
-	RegisterComponent("test.svc", func() Component { return &svcProvider{} },
+	registerForTest("test.svc", func() Component { return &svcProvider{} },
 		WithService(func(c Component) *svcValue { return c.(*svcProvider).v }))
-	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	registerForTest("test.spy", func() Component { return &spy{r: &recorder{}} })
 	root := &Node{
 		Type: "test.spy", ID: "root",
 		Children: []*Node{{Type: "test.svc", ID: "users"}},
@@ -563,9 +563,9 @@ func (u *routerUser) Build(ctx *Scope) error {
 }
 
 func regWebPair() {
-	RegisterComponent("test.web", func() Component { return &routerProv{} },
+	registerForTest("test.web", func() Component { return &routerProv{} },
 		WithService(func(c Component) *routerVal { return c.(*routerProv).v }))
-	RegisterComponent("test.ruser", func() Component { return &routerUser{} })
+	registerForTest("test.ruser", func() Component { return &routerUser{} })
 }
 
 // TestMultiInstanceTreePriority mounts two provider instances (main /
@@ -662,10 +662,10 @@ func (m *multiProv) Build(*Scope) error {
 }
 
 func TestMultipleServices(t *testing.T) {
-	RegisterComponent("test.multi", func() Component { return &multiProv{} },
+	registerForTest("test.multi", func() Component { return &multiProv{} },
 		WithService(func(c Component) *svcX { return c.(*multiProv).x }),
 		WithService(func(c Component) *svcY { return c.(*multiProv).y }))
-	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	registerForTest("test.spy", func() Component { return &spy{r: &recorder{}} })
 	root := &Node{
 		Type: "test.spy", ID: "root",
 		Children: []*Node{{Type: "test.multi", ID: "m"}},
@@ -701,7 +701,7 @@ type catConfig struct {
 // names, service flags, eager mode, events, descriptions and config
 // keys.
 func TestComponentsCatalog(t *testing.T) {
-	RegisterComponent("test.cat", func() Component { return &catProv{} },
+	registerForTest("test.cat", func() Component { return &catProv{} },
 		WithConfig[catConfig](),
 		WithService(func(c Component) *catSvc { return &catSvc{} }),
 		WithEvents("test.one", "test.*"),
@@ -772,8 +772,8 @@ func (s *argsSpy) Run(ctx *Scope) error { s.got = ctx.Args; return nil }
 // a parent activates one of its direct children with arguments, which
 // the child reads via Scope.Args; non-children are rejected.
 func TestScopeActivate(t *testing.T) {
-	RegisterComponent("test.argsspy", func() Component { return &argsSpy{} })
-	RegisterComponent("test.spy", func() Component { return &spy{r: &recorder{}} })
+	registerForTest("test.argsspy", func() Component { return &argsSpy{} })
+	registerForTest("test.spy", func() Component { return &spy{r: &recorder{}} })
 	root := &Node{
 		Type: "test.spy", ID: "root",
 		Children: []*Node{

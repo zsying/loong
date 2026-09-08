@@ -3,7 +3,6 @@ package loong
 import (
 	"errors"
 	"fmt"
-	"log/slog"
 	"reflect"
 	"sync"
 )
@@ -148,7 +147,11 @@ func (k *Kernel) registerService(n *Node) error {
 			k.services[sd.typ] = m
 		}
 		if _, exists := m[n.ID]; exists {
-			slog.Warn("loong: service already provided by node, overwriting", "id", n.ID, "type", sd.typ.String())
+			// Unreachable today (a node is built exactly once), but fail
+			// loudly if the activation bookkeeping ever regresses — a
+			// silent overwrite here would corrupt the service table.
+			k.mu.Unlock()
+			return fmt.Errorf("loong: node %q already provides a service for %s", n.ID, sd.typ)
 		}
 		m[n.ID] = v
 	}

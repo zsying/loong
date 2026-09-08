@@ -5,6 +5,26 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-09-09
+
+Hardening release, driven by the owlet migration review.
+
+### Changed
+
+- **Breaking**: `RegisterComponent` now panics on a duplicate component type
+  name, mirroring `database/sql.Register` and `flag` — a silent overwrite made
+  the config tree resolve to whichever `init()` happened to run last.
+- Service registration on a node whose id already provides the same service
+  type now fails the activation instead of warn-and-overwrite. (Defensive:
+  activation bookkeeping makes it unreachable today.)
+
+### Docs
+
+- Component authoring guide: added the `Scope` vs `context.Context` boundary
+  rule — tree collaboration (services, config, events) goes through `Scope`;
+  I/O cancellation and timeouts go through `context.Context`, with the cancel
+  owned by the component instance and invoked in `Stop`.
+
 ## [0.1.0] - 2026-09-07
 
 First published release. loong is a general-purpose platform: bring it into your
