@@ -58,6 +58,14 @@ func (k *Kernel) Assemble(root *Node) error {
 		if n.Lazy {
 			return nil
 		}
+		if n.actDone {
+			// Already activated (Built + Run) on demand via ensureActive
+			// during another node's Build. Skip the Build re-run here so
+			// the component is not instantiated, wired or registered twice;
+			// still record it so a later failure stops it in reverse order.
+			built = append(built, n)
+			return nil
+		}
 		if err := k.buildNode(n); err != nil {
 			return errors.Join(fmt.Errorf("loong: build %q: %w", n.ID, err), k.stopReverse(built))
 		}
@@ -68,6 +76,11 @@ func (k *Kernel) Assemble(root *Node) error {
 	}
 	return k.walk(root, func(n *Node) error {
 		if n.Lazy {
+			return nil
+		}
+		if n.actDone {
+			// Already Run by ensureActive during the Build walk; do not
+			// Run it a second time.
 			return nil
 		}
 		if err := n.component.Run(&Scope{Kernel: k, Node: n}); err != nil {
