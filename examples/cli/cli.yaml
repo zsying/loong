@@ -2,6 +2,10 @@
 # 根用内置 base 容器；cli 总控作为普通子组件（默认装配激活）解析
 # 命令行并激活命令；命令节点 lazy 按需激活；config 组演示多级命令；
 # log 提供平台日志（命令执行/错误都可记录）。
+#
+# 描述分两级：节点写 desc:（usage 列表逐节点显示，组节点借此描述自己），
+# 未写则回退组件类型的 WithDesc。master 节点的 desc 是程序主说明，
+# 显示在 help 屏头部。
 type: base
 config:
   name: demo-cli
@@ -12,6 +16,7 @@ children:
       level: debug
       format: console
   - type: cli
+    desc: demo-cli - a component-tree driven command line application
     children:
       - type: cli.list
         id: list
@@ -25,6 +30,7 @@ children:
       - type: cli.group
         id: config
         lazy: true
+        desc: Inspect and change the demo settings
         children:
           - type: demo.config.show
             id: show
