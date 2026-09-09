@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -824,3 +825,69 @@ func TestScopeConfig(t *testing.T) {
 		t.Fatalf("empty config = %+v, err %v, want zero value", z, err)
 	}
 }
+
+func TestStrictEmit(t *testing.T) {
+	// With a subscriber on the direct parent, MustEmit delivers like
+	// Emit and returns the handler's error.
+	var got string
+	registerForTest("test.sparent", func() Component { return &eventParent{got: &got} })
+	registerForTest("test.schild", func() Component { return &strictChild{strict: true} })
+	root := &Node{
+		Type: "test.sparent", ID: "sparent",
+		Children: []*Node{{Type: "test.schild", ID: "schild"}},
+	}
+	k := New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	if got != "schild" {
+		t.Errorf("MustEmit delivered to %q, want schild", got)
+	}
+
+	// Without a subscriber: Emit stays silent (notification semantics),
+	// MustEmit reports ErrNoSubscriber loudly (hook semantics).
+	registerForTest("test.quiet", func() Component { return &quietParent{} })
+	registerForTest("test.schild2", func() Component { return &strictChild{strict: false} })
+	root2 := &Node{
+		Type: "test.quiet", ID: "quiet",
+		Children: []*Node{{Type: "test.schild2", ID: "schild2"}},
+	}
+	k2 := New()
+	if err := k2.Assemble(root2); err != nil {
+		t.Fatal(err)
+	}
+
+	// At the root there is no parent at all — MustEmit fails there too.
+	rootScope := &Scope{Kernel: k2, Node: root2}
+	if err := rootScope.MustEmit("x.any", nil); !errors.Is(err, ErrNoSubscriber) {
+		t.Errorf("root MustEmit = %v, want ErrNoSubscriber", err)
+	}
+}
+
+// strictChild emits both event styles during Run: Emit then MustEmit.
+type strictChild struct {
+	Base
+	strict bool
+}
+
+func (c *strictChild) Run(ctx *Scope) error {
+	if err := ctx.Emit("x.hello", "hi"); err != nil {
+		return err
+	}
+	if c.strict {
+		return ctx.MustEmit("x.hello", "hi")
+	}
+	// Unsubscribed name: MustEmit must fail with ErrNoSubscriber while
+	// Emit on the same name returns nil.
+	if err := ctx.Emit("x.nobody", nil); err != nil {
+		return fmt.Errorf("Emit unexpected error: %w", err)
+	}
+	err := ctx.MustEmit("x.nobody", nil)
+	if !errors.Is(err, ErrNoSubscriber) {
+		return fmt.Errorf("MustEmit = %v, want ErrNoSubscriber", err)
+	}
+	return nil
+}
+
+// quietParent subscribes to nothing.
+type quietParent struct{ Base }

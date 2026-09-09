@@ -18,6 +18,11 @@ type Group struct {
 
 func (g *Group) Run(ctx *loong.Scope) error {
 	args, _ := ctx.Args.([]string)
+	// Dual Args contract: a master with flags peeling may hand down
+	// *Globals — the group unpacks Rest so either form works.
+	if gl, ok := ctx.Args.(*Globals); ok {
+		args = gl.Rest
+	}
 	if len(args) == 0 {
 		return fmt.Errorf("%w: %s requires one of [%s]", ErrUsage, ctx.Node.ID, strings.Join(childIDs(ctx.Node), ", "))
 	}

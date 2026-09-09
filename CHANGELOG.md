@@ -5,6 +5,31 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **cli master**: `default` config — bare invocation activates the named child
+  command instead of printing usage (TUI-first apps like owlet no longer need
+  a custom master).
+- **cli master**: `flags` config — global flag schema (`short` alias, `bool` /
+  `value` kind) peeled anywhere in the argv, POSIX-style; undeclared tokens
+  pass through untouched. A dangling value flag is a loud error.
+- **cli master**: `pre` config — a lazy child activated once, before the first
+  command, with `*cli.Globals` (peeled flags + rest). The componentized
+  PersistentPreRunE: runs exactly once per process (activation cache), never
+  on the usage path, is not selectable as a command, and its failure aborts
+  the whole activation chain. Commands keep receiving `[]string`; `cli.group`
+  unpacks either form.
+- **events**: `Scope.MustEmit` / `ErrNoSubscriber` — the strict Emit for
+  hook-style events: a missing subscriber is a loud error instead of a silent
+  drop. Plain `Emit` keeps the lenient notification semantics.
+
+### Docs
+
+- Event routing contract made explicit: routing is deliberately single-hop
+  (child -> direct parent), no bubbling; relay upward by emitting a new event.
+
 ## [0.2.0] - 2026-09-09
 
 Hardening release, driven by the owlet migration review.

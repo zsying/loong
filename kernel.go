@@ -355,7 +355,8 @@ func (k *Kernel) stopReverse(nodes []*Node) error {
 }
 
 // emit routes an event from a node to its direct parent handler table.
-// The root has no parent; unmatched event names are dropped.
+// The root has no parent; unmatched event names are dropped. Routing
+// is deliberately single-hop — see Event for the design contract.
 func (k *Kernel) emit(from *Node, e Event) error {
 	if from.parent == nil {
 		return nil
@@ -364,4 +365,17 @@ func (k *Kernel) emit(from *Node, e Event) error {
 		return h(e)
 	}
 	return nil
+}
+
+// emitStrict is the MustEmit backing: an event without a subscriber on
+// the direct parent (or emitted at the root, which has no parent) is a
+// loud ErrNoSubscriber instead of a silent drop.
+func (k *Kernel) emitStrict(from *Node, e Event) error {
+	if from.parent == nil {
+		return fmt.Errorf("%w: %q emitted at the root", ErrNoSubscriber, e.Name)
+	}
+	if h, ok := from.parent.handlers[e.Name]; ok {
+		return h(e)
+	}
+	return fmt.Errorf("%w: %q from %q on parent %q", ErrNoSubscriber, e.Name, from.ID, from.parent.ID)
 }

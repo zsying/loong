@@ -49,15 +49,30 @@ func (s *Scope) Activate(id string, args any) error {
 }
 
 // Emit sends an event upward to the direct parent node.
-// The component never holds a reference to its parent.
+// The component never holds a reference to its parent. Routing is
+// single-hop and lenient: when the parent has no handler for the name
+// the event is silently dropped (see Event for the design contract) —
+// the right behavior for notifications. For hook-style events whose
+// missing subscriber is a bug, use MustEmit.
 func (s *Scope) Emit(name string, payload any) error {
 	return s.Kernel.emit(s.Node, Event{Name: name, Source: s.Node.ID, Payload: payload})
+}
+
+// MustEmit is the strict Emit: it fails with ErrNoSubscriber when the
+// direct parent has no handler for the event name (or when the node is
+// the root, which has no parent to receive events at all). Use it for
+// hook-style events — a master asking its app-level parent to apply
+// global flags, for instance — where a silently dropped event would
+// surface later as a baffling no-op.
+func (s *Scope) MustEmit(name string, payload any) error {
+	return s.Kernel.emitStrict(s.Node, Event{Name: name, Source: s.Node.ID, Payload: payload})
 }
 
 // On subscribes to an event name emitted by any child node.
 // Subscription happens during Build, after the node is created but
 // before Run, so handlers are in place before any event fires.
-// Unregistered events are silently dropped.
+// Unregistered events are silently dropped by Emit; MustEmit turns
+// that drop into an error for hook-style events.
 func (s *Scope) On(name string, h Handler) {
 	if s.Node.handlers == nil {
 		s.Node.handlers = make(map[string]Handler)
