@@ -40,6 +40,9 @@ var ErrUsage = errors.New("cli: usage error")
 //	    verbose: { short: v, kind: bool }
 //	    lang:    { kind: value }
 //
+// The master node's own Desc is the program description printed at the
+// top of the help screen.
+//
 // The pre node receives *Globals (peeled flags + remaining args); the
 // command receives []string. Pre semantics: it runs once per process
 // (ensureActive caches the activation) and only before an actual
@@ -152,20 +155,36 @@ func init() {
 	)
 }
 
-// usage prints the command tree under the master and returns nil:
-// invoking the CLI without a command is a help request, not an error
-// (the process exits 0). The pre node is not a command and is excluded
+// usage prints the program header, the command tree under the master
+// and returns nil: invoking the CLI without a command is a help
+// request, not an error (the process exits 0). The master node's own
+// Desc, when set, is the program's one-line description — the header
+// above the usage block. The pre node is not a command and is excluded
 // from the listing. Only an incomplete invocation — e.g. a cli.group
 // reached without a subcommand — reports ErrUsage.
 func usage(ctx *loong.Scope, pre string) error {
-	fmt.Println("usage: <command>")
+	return writeUsage(os.Stdout, ctx.Node, pre, isTerminal(os.Stdout))
+}
+
+// writeUsage renders the help screen: the program description (the
+// master node's Desc, when set), the usage line, and the two-column
+// command listing — each section separated by a blank line, with a
+// trailing blank line so the prompt picks up on a fresh row.
+func writeUsage(w io.Writer, n *loong.Node, pre string, color bool) error {
+	if n.Desc != "" {
+		fmt.Fprintln(w, n.Desc)
+		fmt.Fprintln(w)
+	}
+	fmt.Fprintln(w, "usage: <command>")
+	fmt.Fprintln(w)
 	var cmds []*loong.Node
-	for _, c := range ctx.Node.Children {
+	for _, c := range n.Children {
 		if c.ID != pre {
 			cmds = append(cmds, c)
 		}
 	}
-	writeCommands(os.Stdout, cmds, isTerminal(os.Stdout))
+	writeCommands(w, cmds, color)
+	fmt.Fprintln(w)
 	return nil
 }
 

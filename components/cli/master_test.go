@@ -469,3 +469,37 @@ func TestUsageRendering(t *testing.T) {
 		t.Errorf("color mode missing bold/gray: %q", buf.String())
 	}
 }
+
+// TestWriteUsageLayout pins the help-screen layout: the master's Desc
+// becomes the program header, blank lines separate the sections, and
+// a master without a Desc skips the header entirely.
+func TestWriteUsageLayout(t *testing.T) {
+	master := &loong.Node{Type: "cli", ID: "cli", Desc: "Owlet - AI harness toolset",
+		Children: []*loong.Node{
+			{Type: "test.rec", ID: "globals", Lazy: true},
+			{Type: "test.rec", ID: "tui", Lazy: true, Desc: "Start the interactive TUI"},
+		}}
+	var buf bytes.Buffer
+	if err := writeUsage(&buf, master, "globals", false); err != nil {
+		t.Fatal(err)
+	}
+	want := "Owlet - AI harness toolset\n" +
+		"\n" +
+		"usage: <command>\n" +
+		"\n" +
+		"  tui Start the interactive TUI\n" +
+		"\n"
+	if buf.String() != want {
+		t.Errorf("layout mismatch:\ngot  %q\nwant %q", buf.String(), want)
+	}
+
+	bare := &loong.Node{Type: "cli", ID: "cli",
+		Children: []*loong.Node{{Type: "test.rec", ID: "tui", Lazy: true}}}
+	buf.Reset()
+	if err := writeUsage(&buf, bare, "", false); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(buf.String(), "usage:") || strings.Contains(buf.String(), "Owlet") {
+		t.Errorf("bare layout wrong: %q", buf.String())
+	}
+}
