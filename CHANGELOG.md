@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on the usage path, is not selectable as a command, and its failure aborts
   the whole activation chain. Commands keep receiving `[]string`; `cli.group`
   unpacks either form.
+- **cli master**: built-in help — `-h` / `--help` anywhere in the argv or a
+  `help` command token print the usage tree and exit 0 (no pre run, no
+  activation). Auto-yield: spellings claimed by the app's flag schema or a
+  child command named "help" pass through untouched.
 - **events**: `Scope.MustEmit` / `ErrNoSubscriber` — the strict Emit for
   hook-style events: a missing subscriber is a loud error instead of a silent
   drop. Plain `Emit` keeps the lenient notification semantics.

@@ -46,6 +46,12 @@ var ErrUsage = errors.New("cli: usage error")
 // the whole activation chain (fail-fast); the pre id is not selectable
 // as a command. Without a config block the master behaves exactly as
 // before: args[0] is the command, bare invocation prints usage.
+//
+// Help is built in: `-h` / `--help` anywhere in the argv, or a `help`
+// command token, print the usage tree and exit 0 — no pre run, no
+// command activation. The master yields both spellings when they are
+// taken: a flag declared with the "h"/"help" spelling keeps the argv
+// token, and a child command named "help" keeps the token.
 type Component struct {
 	loong.Base
 	cfg Config
@@ -89,6 +95,9 @@ func (c *Component) Run(ctx *loong.Scope) error {
 // masterRun is the argv-driven core of the master, separated from Run
 // so tests can drive it without touching the process argv.
 func (c *Component) masterRun(ctx *loong.Scope, args []string) error {
+	if c.helpRequested(args) {
+		return usage(ctx, c.cfg.Pre)
+	}
 	g, err := peel(args, c.cfg.Flags)
 	if err != nil {
 		return err
@@ -99,6 +108,11 @@ func (c *Component) masterRun(ctx *loong.Scope, args []string) error {
 			return usage(ctx, c.cfg.Pre)
 		}
 		cmdID, rest = c.cfg.Default, g.Rest
+	} else if cmdID == "help" && !hasChild(ctx.Node, "help") {
+		// A help token with no command claiming it prints the usage
+		// tree. Like every usage path, no pre runs and nothing
+		// activates.
+		return usage(ctx, c.cfg.Pre)
 	} else if cmdID == c.cfg.Pre {
 		return fmt.Errorf("cli: %q is the pre node, not a command", cmdID)
 	}
@@ -110,6 +124,25 @@ func (c *Component) masterRun(ctx *loong.Scope, args []string) error {
 		}
 	}
 	return ctx.Activate(cmdID, rest)
+}
+
+// helpRequested reports whether the argv asks for help: the exact
+// tokens "-h" or "--help" anywhere, unless the app's flag schema
+// declares those spellings for itself (auto-yield — the master never
+// steals a declared flag).
+func (c *Component) helpRequested(args []string) bool {
+	claimed := map[string]bool{}
+	for name, spec := range c.cfg.Flags {
+		for _, s := range flagSpellings(name, spec) {
+			claimed[s] = true
+		}
+	}
+	for _, a := range args {
+		if (a == "-h" || a == "--help") && !claimed[a] {
+			return true
+		}
+	}
+	return false
 }
 
 func init() {

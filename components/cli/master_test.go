@@ -336,6 +336,65 @@ func TestMasterBuildValidation(t *testing.T) {
 	}
 }
 
+// TestMasterHelp pins the built-in help: "-h" / "--help" anywhere, or
+// a "help" command token, prints the usage tree (nil error) without
+// running the pre node or activating any command.
+func TestMasterHelp(t *testing.T) {
+	cases := [][]string{
+		{"-h"},
+		{"--help"},
+		{"run", "--help"},
+		{"-v", "help"},
+		{"help"},
+	}
+	for _, argv := range cases {
+		n, sc := cliNode(t, masterCfg, masterChildren()...)
+		c := buildMaster(t, n, sc)
+		if err := c.masterRun(sc, argv); err != nil {
+			t.Errorf("help %v = %v, want nil (usage)", argv, err)
+		}
+		for id, r := range fetch(t, n, sc.Kernel) {
+			if r.ran {
+				t.Errorf("help %v activated %q; want usage only", argv, id)
+			}
+		}
+	}
+}
+
+// TestMasterHelpAutoYield pins that the master never steals a spelling
+// an app declared: a flag with short "h" keeps "-h", and a child
+// command named "help" keeps the token.
+func TestMasterHelpAutoYield(t *testing.T) {
+	cfg := `
+default: tui
+pre: globals
+flags:
+  html: { short: h, kind: bool }
+`
+	n, sc := cliNode(t, cfg, masterChildren()...)
+	c := buildMaster(t, n, sc)
+	if err := c.masterRun(sc, []string{"-h"}); err != nil {
+		t.Fatalf("-h with declared flag: %v", err)
+	}
+	recs := fetch(t, n, sc.Kernel)
+	if !recs["tui"].ran {
+		t.Error("-h did not fall through to the default command")
+	}
+	g := recs["globals"].gotAny.(*Globals)
+	if g.Flags["html"] != "true" {
+		t.Errorf("html flag = %q, want true (all: %v)", g.Flags["html"], g.Flags)
+	}
+
+	n2, sc2 := cliNode(t, masterCfg, append(masterChildren(), &loong.Node{Type: "test.rec", ID: "help", Lazy: true})...)
+	c2 := buildMaster(t, n2, sc2)
+	if err := c2.masterRun(sc2, []string{"help"}); err != nil {
+		t.Fatalf("help command: %v", err)
+	}
+	if r := fetch(t, n2, sc2.Kernel)["help"]; r == nil || !r.ran {
+		t.Error("help token did not activate the help command")
+	}
+}
+
 // TestGroupUnwrapsGlobals pins the dual Args contract: cli.group
 // accepts both the legacy []string and *Globals (Rest unpacked) so it
 // works under any master.
