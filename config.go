@@ -9,8 +9,13 @@ import (
 )
 
 // Node is one component instance in the config tree. The kernel only
-// reads the skeleton (type/id/lazy/children); Config stays opaque and
-// is decoded by the component itself (schema-per-component).
+// reads the skeleton (type/id/desc/lazy/children); Config stays opaque
+// and is decoded by the component itself (schema-per-component).
+//
+// Desc is the node's one-line description shown by CLI usage listings
+// (see the cli component). It describes this instance — a generic group
+// node can say "Manage the background daemon" — and falls back to the
+// component type's WithDesc when empty.
 //
 // Lazy nodes are registered during assembly but not activated: they
 // are instantiated on demand through Get[T]() (service components) or
@@ -19,6 +24,7 @@ import (
 type Node struct {
 	Type     string    `yaml:"type"`
 	ID       string    `yaml:"id,omitempty"`
+	Desc     string    `yaml:"desc,omitempty"`
 	Lazy     bool      `yaml:"lazy,omitempty"`
 	Config   yaml.Node `yaml:"config"`
 	Children []*Node   `yaml:"children"`

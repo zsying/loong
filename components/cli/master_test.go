@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"reflect"
 	"strings"
@@ -421,5 +422,50 @@ func TestGroupUnwrapsGlobals(t *testing.T) {
 	show, _ := k.Component("show")
 	if got := show.(*gotArgs).got; !reflect.DeepEqual(got, []string{"theme"}) {
 		t.Errorf("leaf args = %#v, want [theme]", got)
+	}
+}
+
+// TestUsageRendering pins the two-column usage listing: node-level
+// descriptions (Node.Desc) win over the component type's WithDesc,
+// groups render their subcommands inline, and color is opt-in via the
+// flag (bold names, gray descriptions).
+func TestUsageRendering(t *testing.T) {
+	nodes := []*loong.Node{
+		{Type: "owlet.tui", ID: "tui", Desc: "Start the interactive TUI"},
+		{Type: "cli.group", ID: "daemon", Children: []*loong.Node{
+			{Type: "test.rec", ID: "start", Lazy: true},
+		}}, // no node desc -> falls back to the type's WithDesc
+		{Type: "test.rec", ID: "bare"}, // no desc anywhere -> no second column
+	}
+	var buf bytes.Buffer
+	writeCommands(&buf, nodes, false)
+	out := buf.String()
+	if !strings.Contains(out, "tui") || !strings.Contains(out, "Start the interactive TUI") {
+		t.Errorf("missing tui line/desc: %s", out)
+	}
+	if !strings.Contains(out, "daemon <start>") {
+		t.Errorf("group line not rendered inline: %s", out)
+	}
+	if !strings.Contains(out, "CLI command group container") {
+		t.Errorf("type WithDesc fallback missing: %s", out)
+	}
+	if strings.Contains(out, "\x1b[") {
+		t.Errorf("plain mode emitted ANSI codes: %s", out)
+	}
+	// Aligned second column: every description starts at the same
+	// column within its line (padding to the widest head).
+	col := func(s string) int {
+		i := strings.Index(out, s)
+		return i - (strings.LastIndex(out[:i], "\n") + 1)
+	}
+	tui, fb := col("Start the interactive"), col("CLI command group container")
+	if tui == -1 || fb == -1 || tui != fb {
+		t.Errorf("descriptions not column-aligned (tui=%d fallback=%d): %s", tui, fb, out)
+	}
+
+	buf.Reset()
+	writeCommands(&buf, nodes[:1], true)
+	if !strings.Contains(buf.String(), ansiBold+"tui") || !strings.Contains(buf.String(), ansiGray+"Start") {
+		t.Errorf("color mode missing bold/gray: %q", buf.String())
 	}
 }

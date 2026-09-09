@@ -127,6 +127,13 @@ type ConfigField struct {
 	Optional bool   // yaml tag carries omitempty
 }
 
+// Describe returns the WithDesc description registered for the given
+// component type, or "" when the type is unknown or undescribed. It is
+// the type-level fallback for node-level descriptions (Node.Desc).
+func Describe(componentType string) string {
+	return factories[componentType].desc
+}
+
 // Components returns metadata for every init()-registered component
 // type. It is the discovery entry point for using loong at scale:
 // pick a type name for the config tree, inspect its config keys and

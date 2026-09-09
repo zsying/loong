@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `help` command token print the usage tree and exit 0 (no pre run, no
   activation). Auto-yield: spellings claimed by the app's flag schema or a
   child command named "help" pass through untouched.
+- **config tree**: `desc` node field — a per-node one-line description shown
+  by CLI usage listings (a generic cli.group node can say "Manage the
+  background daemon"); falls back to the component type's WithDesc.
+- **cli master**: usage listing is a two-column table — bold command names
+  (with inline subcommands for groups) and gray descriptions, color enabled
+  only on an interactive stdout.
 - **events**: `Scope.MustEmit` / `ErrNoSubscriber` — the strict Emit for
   hook-style events: a missing subscriber is a loud error instead of a silent
   drop. Plain `Emit` keeps the lenient notification semantics.

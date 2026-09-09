@@ -14,6 +14,7 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -164,8 +165,69 @@ func usage(ctx *loong.Scope, pre string) error {
 			cmds = append(cmds, c)
 		}
 	}
-	printCommands(cmds, 1)
+	writeCommands(os.Stdout, cmds, isTerminal(os.Stdout))
 	return nil
+}
+
+// ANSI SGR sequences for the usage listing — bold for command names,
+// gray for descriptions. Enabled only on an interactive stdout, same
+// rule as the log component's console format.
+const (
+	ansiBold  = "\x1b[1m"
+	ansiGray  = "\x1b[90m"
+	ansiReset = "\x1b[0m"
+)
+
+// writeCommands renders the command list as a two-column table: the
+// command name (plus its subcommands for groups) in bold, and the
+// node's description — Node.Desc, falling back to the component type's
+// WithDesc — in gray. Descriptions align in a second column.
+func writeCommands(w io.Writer, cmds []*loong.Node, color bool) {
+	heads := make([]string, len(cmds))
+	descs := make([]string, len(cmds))
+	width := 0
+	for i, c := range cmds {
+		head := c.ID
+		if len(c.Children) > 0 {
+			head += " <" + groupNames(c.Children) + ">"
+		}
+		heads[i] = head
+		if len(head) > width {
+			width = len(head)
+		}
+		descs[i] = c.Desc
+		if descs[i] == "" {
+			descs[i] = loong.Describe(c.Type)
+		}
+	}
+	for i, head := range heads {
+		if descs[i] == "" {
+			line := "  " + head
+			if color {
+				line = "  " + ansiBold + head + ansiReset
+			}
+			fmt.Fprintln(w, line)
+			continue
+		}
+		padded := head + strings.Repeat(" ", width-len(head))
+		name, desc := padded+" ", descs[i]
+		if color {
+			name, desc = "  "+ansiBold+padded+ansiReset+" ", ansiGray+descs[i]+ansiReset
+		} else {
+			name = "  " + name
+		}
+		fmt.Fprintln(w, name+desc)
+	}
+}
+
+// isTerminal reports whether f is an interactive terminal, not a
+// redirected file (same detection as the log component).
+func isTerminal(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&os.ModeCharDevice != 0
 }
 
 func hasChild(n *loong.Node, id string) bool {
@@ -175,19 +237,6 @@ func hasChild(n *loong.Node, id string) bool {
 		}
 	}
 	return false
-}
-
-// printCommands renders a node's children with indentation, marking
-// command groups with their subcommands.
-func printCommands(cmds []*loong.Node, depth int) {
-	indent := strings.Repeat("  ", depth)
-	for _, c := range cmds {
-		if len(c.Children) > 0 {
-			fmt.Printf("%s%s <%s>\n", indent, c.ID, groupNames(c.Children))
-			continue
-		}
-		fmt.Printf("%s%s\n", indent, c.ID)
-	}
 }
 
 func groupNames(children []*loong.Node) string {
