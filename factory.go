@@ -143,6 +143,16 @@ func RegisterComponent(typeName string, factory func() Component, opts ...Compon
 	factories[typeName] = e
 }
 
+// RegisterFunc registers a run-only component type from a single
+// function. It is sugar over RegisterComponent: the factory returns a
+// fresh Func each call, which is stateless, so several nodes of the same
+// type are safe. Use it for command nodes that act only when run and
+// need no Build/Stop phases; components that decode config or register
+// services at build time keep a struct embedding Base.
+func RegisterFunc(typeName string, run func(*Scope) error, opts ...ComponentOption) {
+	RegisterComponent(typeName, func() Component { return Func(run) }, opts...)
+}
+
 // ComponentMeta is the discoverable metadata of one registered
 // component type, returned by Components().
 type ComponentMeta struct {

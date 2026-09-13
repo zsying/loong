@@ -57,3 +57,24 @@ func init() {
 		WithDesc("generic container/root with a no-op lifecycle"),
 	)
 }
+
+// Func is a Component implemented by a single Run function. Build and
+// Stop are no-ops, so it suits command nodes that act only when run and
+// need no build-time wiring or teardown — the loong analogue of a React
+// function component: the component is just what it does.
+//
+//	loong.RegisterFunc("owlet.version", func(ctx *loong.Scope) error {
+//	    return printVersion()
+//	}, loong.WithDesc("print version information"))
+//
+// The run function receives the scope directly, so it can call
+// ctx.Config / ctx.Emit / ctx.Activate without holding a Base. Because
+// Func is stateless, RegisterFunc's factory returns a fresh value per
+// node, which is safe for several nodes of the same type. Components
+// that decode config or register services at build time keep a struct
+// embedding Base.
+type Func func(ctx *Scope) error
+
+func (f Func) Build(*Scope) error { return nil }
+func (f Func) Run(ctx *Scope) error { return f(ctx) }
+func (f Func) Stop(*Scope) error   { return nil }
