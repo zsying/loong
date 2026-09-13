@@ -51,8 +51,91 @@ func (c *echoComp) Build(ctx *loong.Scope) error {
 	return nil
 }
 
+// activator is the shape a real parent has: a component that activates
+// one of its children and hands it a value the tree could not spell.
+type activator struct {
+	loong.Base
+	cfg activatorConfig
+	err error
+}
+
+type activatorConfig struct {
+	Child string `yaml:"child"`
+	Arg   string `yaml:"arg"`
+}
+
+func (a *activator) Build(sc *loong.Scope) error {
+	c, err := sc.Config[activatorConfig]()
+	if err != nil {
+		return err
+	}
+	a.cfg = c
+	return nil
+}
+
+func (a *activator) Run(sc *loong.Scope) error {
+	a.err = sc.Activate(a.cfg.Child, a.cfg.Arg)
+	return nil
+}
+
 func init() {
 	loong.RegisterComponent("test.echo", func() loong.Component { return &echoComp{} })
+	loong.RegisterComponent("test.activator", func() loong.Component { return &activator{} })
+}
+
+// TestWebListenFromActivationArgument covers the address a tree cannot
+// spell: it only exists after the application has read its own user
+// configuration, so the parent activating the node holds it. The node
+// must bind there, and must refuse to be told twice — a config value and
+// an argument are two answers to one question, not a precedence.
+func TestWebListenFromActivationArgument(t *testing.T) {
+	root := &loong.Node{
+		Type: "base", ID: "root",
+		Children: []*loong.Node{
+			{Type: "test.activator", ID: "holder",
+				Config: cfgNode(t, "child: late\narg: 127.0.0.1:0\n"),
+				Children: []*loong.Node{
+					{Type: "web", ID: "late", Lazy: true},
+				}},
+			{Type: "test.activator", ID: "clash",
+				Config: cfgNode(t, "child: doubled\narg: 127.0.0.1:0\n"),
+				Children: []*loong.Node{
+					{Type: "web", ID: "doubled", Lazy: true, Config: cfgNode(t, "listen: 127.0.0.1:0\n")},
+				}},
+		},
+	}
+	k := loong.New()
+	if err := k.Assemble(root); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = k.Shutdown() }()
+
+	holder, err := k.Component("holder")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aerr := holder.(*activator).err; aerr != nil {
+		t.Fatalf("activating the lazy web node: %v", aerr)
+	}
+	comp, err := k.Component("late")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := comp.(*Web).Addr()
+	if addr == nil {
+		t.Fatal("Addr() = nil: the activation argument never reached the listener")
+	}
+	if !strings.HasPrefix(addr.String(), "127.0.0.1:") {
+		t.Errorf("bound %q, want the address the parent passed", addr)
+	}
+
+	clash, err := k.Component("clash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if aerr := clash.(*activator).err; aerr == nil || !strings.Contains(aerr.Error(), "both in config") {
+		t.Errorf("activating a node that names its address twice = %v, want a conflict error", aerr)
+	}
 }
 
 func getReq(t *testing.T, h http.Handler, method, path string, body any) *httptest.ResponseRecorder {

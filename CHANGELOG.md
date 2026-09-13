@@ -34,6 +34,103 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **events**: `Scope.MustEmit` / `ErrNoSubscriber` — the strict Emit for
   hook-style events: a missing subscriber is a loud error instead of a silent
   drop. Plain `Emit` keeps the lenient notification semantics.
+- **kernel**: `Providers[T]()` — the ids of every node that can serve T, in tree
+  declaration order. The discovery half of `GetFrom[T](id)`: with two providers
+  of one type mounted, this is how a caller learns what there is to name. Purely
+  structural — lazy nodes are listed before activation, and asking activates
+  nothing.
+- **kernel**: `NodeInfo` (from `Root()` / `Node(id)`) now carries the node's own
+  `Desc` and its `ParentID`, so a tree view renders descriptions and paths from
+  the public view instead of reaching into the internal `*Node`.
+- **kernel**: `WithContributes[Kind]()` / `Scope.Provide[Kind](name)` /
+  `Kernel.Contributions[Kind]()` — tree-declared capabilities. A type whose
+  nodes contribute a named item declares it once and the name is the node's own
+  id, so what a subtree offers is read from the skeleton: no activation, and no
+  dependency on the order the tree happens to be built in (a consumer no longer
+  has to resolve capabilities through whatever has already registered them).
+  `Provide` adds names that cannot exist before the component runs — a remote
+  server's tool list, say. One name has one owner: re-affirming a name is a
+  no-op, and a second node claiming it fails where it claims.
+- **kernel**: `WithOptionalService[T](get)` — a service that may not exist.
+  A nil accessor result means this node serves nothing of type T, and every
+  lookup skips it as if it had declared nothing, so "no backend configured, no
+  such capability" needs no sentinel value for consumers to unpack. A required
+  service still fails the activation on nil, which is what tells a component it
+  returned too early.
+- **kernel**: `Kernel.Consumers[T]()` — the ids of the nodes that actually
+  resolved T, in tree order. `Providers[T]()` says who can serve a service;
+  this says who used it. It is a trace, not a declaration: a node that never
+  ran and a lookup that found nothing both record nothing.
+- **kernel**: `NodeInfo` now also carries `Services` (the service types the
+  node's component type declares) and `Contributes` (the names the node holds),
+  so a `tree` view renders what a node offers from the same walk that renders
+  the tree, without joining `Components()` by type afterwards.
+- **web**: the listen address may arrive as the activation argument — the shape
+  a node needs when its address only exists after the application has read its
+  own configuration (the tree cannot spell it, the parent holding it can).
+  `Scope.Activate(id, "127.0.0.1:8080")` on a web node whose config leaves
+  `listen` empty binds there. Naming the address twice — config and argument —
+  is reported rather than resolved by precedence, and an unsupported argument
+  type is an error instead of a silently unused one.
+
+### Changed
+
+- **Assembly is the root's activation.** `Assemble` had its own copy of the
+  build/run walk; it now indexes the tree and activates the root, which is the
+  same two-phase walk a lazy subtree gets (the whole active tree Build, parent
+  before child, before any Run). One build path means one set of rules — a
+  component is instantiated in exactly one place — and the activation
+  bookkeeping now covers assembly too: a node the tree brought up counts as
+  active, so a later on-demand activation of it is a no-op instead of a second
+  instance (which used to happen silently for components that provide no
+  service).
+- **A Build that needs a service from a node still building is reported.** Since
+  activating a node activates its subtree, a service lookup made during a Build
+  can start a subtree whose own Build needs the node that asked for it — a
+  build-time cycle (owlet's shape: the coordinator's Build needs the tool
+  registry, and the registry's dispatch child needs the coordinator). Neither
+  Build can finish first, so the node that was already being built is now named
+  rather than built again, and the error says what resolves it: declare the
+  provider above the consumer in the tree.
+- **`lazy` marks a subtree, not a node.** `lazy: true` turns off everything
+  mounted under the node, and activating the node brings that subtree up in the
+  two phases assembly uses: every Build, parent before child, before any Run.
+  The marker used to be read per node, so a non-lazy child of a lazy node was
+  built at startup — a tree could report a subsystem as off while part of it was
+  already running, and the child's Build ran without the parent its wiring
+  assumes. A descendant marked lazy remains a decision of its own and is
+  activated separately; activation is still idempotent per node (the anchor
+  caches the outcome, descendants are marked active with it), a subtree that
+  fails to come up stops what it did build, in reverse, and a failed build now
+  names the node inside the subtree that failed. Activation arguments still
+  belong to the node they were passed to: the subtree inherits the activation,
+  not the argument. Views that describe the tree rather than run it — `Shutdown`,
+  `Contributions[T]`, `NodeInfo` — still walk dormant subtrees, which is what
+  lets them report what is there before anything activated it.
+
+### Fixed
+
+- The "node already provides a service" branch of service registration unlocked
+  the kernel mutex by hand and again through its `defer`, so reaching it panicked
+  with `fatal error: sync: unlock of unlocked mutex` instead of returning the
+  error — which is what happened the first time a build-time cycle got there.
+  The branch is only reachable through such a bug, and it now reports one.
+- Inactive-provider lookup chose the component *type* to activate from a
+  map-ordered index built at `New()`. When one service type was declared by
+  several component types, that index kept an arbitrary one of them, so the same
+  tree could answer differently between processes: the lookup missed a provider
+  that existed (`no node of service type "..."`), or silently returned a
+  provider that was not the caller's nearest ancestor. Candidates are now the
+  mounted nodes themselves — tree order, nearest ancestor wins — and the two
+  type-keyed indexes (`serviceIdx`, `nodesByType`) are gone. The empty-lookup
+  error also separates "nothing declares this service" from "the declaring
+  types have no node mounted", naming the types in the second case.
+
+### Removed
+
+- The registration-time warning about two component types declaring the same
+  service type. It is a supported arrangement — resolution is per node — so the
+  warning described a limitation that no longer exists.
 
 ### Docs
 

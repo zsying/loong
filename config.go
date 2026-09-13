@@ -17,10 +17,11 @@ import (
 // node can say "Manage the background daemon" — and falls back to the
 // component type's WithDesc when empty.
 //
-// Lazy nodes are registered during assembly but not activated: they
-// are instantiated on demand through Get[T]() (service components) or
-// Kernel.Activate. The act* fields guard that on-demand activation
-// against concurrent callers.
+// Lazy nodes are registered during assembly but not activated: a lazy
+// node stands for the subtree mounted under it, which stays off and comes
+// up as one activation — through Get[T]() (a lookup that needs its
+// service), Scope.Activate or Kernel.Activate. The act* fields guard that
+// on-demand activation against concurrent callers.
 type Node struct {
 	Type     string    `yaml:"type"`
 	ID       string    `yaml:"id,omitempty"`
@@ -36,6 +37,12 @@ type Node struct {
 	actMu   sync.Mutex
 	actDone bool
 	actErr  error
+
+	// building is set while this node's Build is on the stack, so a
+	// second Build of the same node is refused rather than run (see
+	// Kernel.buildNode). It is one node's own flag, written and read by
+	// the activation that owns it.
+	building bool
 }
 
 // envRe matches ${ENV_VAR} placeholders expanded from the environment.

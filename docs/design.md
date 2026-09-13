@@ -37,6 +37,7 @@
 - **配置树格式：YAML**，两段式解析（schema-per-component），详见 4.2。
 - **日志：标准库 log/slog**，console（彩色文本，默认）/ json 双格式、级别可配，零外部依赖。
 - **服务查找：Scope.Get[T]()** 树优先级（唯一提供者或父链最近），Go 类型即 key（不用字符串）。
+- **能力贡献：** 组件类型用 `WithContributes[Kind]()` 声明「本类型节点的 id 是 Kind 家族里的一个名字」，运行期才知道的名字用 `Scope.Provide[Kind](name)` 补；`Kernel.Contributions[Kind]()` 枚举，结构性的先于运行期的。与服务的区别：贡献只有名字，不要实例，所以从 skeleton 就能回答。
 - **Web 渠道：标准库 net/http（Go 1.22 方法+路径路由）**；会话令牌由独立 `auth` 组件提供（golang-jwt），渠道组件本身不持有任何鉴权/账号逻辑。
 - **用户存储：modernc.org/sqlite（纯 Go，无 cgo）**，内核留存储接口，后续可换后端。
 - **微信 API：自写最小 HTTP 封装**（code2session / OAuth / 模板消息 / 回调验签），不引入 SDK。
@@ -52,8 +53,11 @@
 | 配置树 | YAML，两段式解析（schema-per-component），支持 `${ENV}` 展开 |
 | 组件 config | `WithConfig[T]` 声明结构（`Components()` 展示字段）；`scope.Config[T]()` 严格解码（未知字段报错） |
 | 事件协议 | `{Name, Source, Payload}`，直达直接父节点，`On(name, handler)` 订阅 |
-| 服务查找 | `Scope.Get[T]()` 树优先级（唯一提供者或父链最近；歧义提示 `GetFrom[T](id)`），Go 类型即 key |
-| 服务组件 | 注册选项 `WithService[T](get)`（可多个）；激活规则与普通组件一致（默认装配激活 / yaml `lazy: true` 按需），多实例并存 |
+| 服务查找 | `Scope.Get[T]()` 树优先级（唯一提供者或父链最近；歧义提示 `GetFrom[T](id)`），Go 类型即 key；`Kernel.Providers[T]()` 枚举候选节点 id |
+| 服务组件 | 注册选项 `WithService[T](get)`（可多个）；激活规则与普通组件一致（默认装配激活 / yaml `lazy: true` 按需激活整棵子树），多实例并存 |
+| 可选服务 | `WithOptionalService[T](get)`：取值返回 nil 即「本节点不提供该服务」，该节点不再是提供者（查找跳过），装配不报错；消费方用 `TryGet` 把"没有"当作一种结果 |
+| 能力贡献 | `WithContributes[Kind]()`（名字 = 节点 id，纯结构、未激活即可枚举）+ `Scope.Provide[Kind](name)`（运行期才知道的名字）；`Kernel.Contributions[Kind]()` 列出两者，一个名字只能有一个主 |
+| 依赖观测 | `Kernel.Consumers[T]()`：实际取过 T 的节点 id（只在成功解析时记录，是 trace 不是声明） |
 | 组件上下文 | `loong.Scope`（刻意避开标准库 `context.Context` 同名冲突） |
 | 日志 | 标准库 log/slog，console（彩色）/ json 双格式、级别可配 |
 | 用户存储 | modernc.org/sqlite（纯 Go，无 cgo） |
@@ -128,7 +132,7 @@ Application Root
 
 - **配置树**声明结构：谁挂在哪、父给什么配置。
 - **init() 自注册**声明类型：组件类型自己向内核注册；注册选项声明服务（`WithService[T](get)`，可多个）、配置结构（`WithConfig[T]`）、发出的事件（`WithEvents`）与描述（`WithDesc`）。
-- **装配器**流程（登记 / 激活两阶段）：读配置树 → 登记（类型校验、id 填充与查重、建索引——零实例化）→ 激活必需节点（非 lazy 节点按 build / run 两阶段启动，先父后子）→ 运行期按需激活 yaml `lazy: true` 节点；Shutdown 对已激活节点按 Run 的逆序调 Stop，未激活节点跳过。
+- **装配器**流程（登记 / 激活两阶段）：读配置树 → 登记（类型校验、id 填充与查重、建索引——零实例化）→ 激活根节点（即整棵非 lazy 树按 build / run 两阶段启动，先父后子）；运行期按需激活 yaml `lazy: true` 节点（连同其非 lazy 子树）。`Assemble` 就是"根节点的一次激活"，没有第二套构建流程——惰性节点与随树启动的节点走同一条路径、同一套状态记录。Shutdown 对已激活节点按 Run 的逆序调 Stop，未激活节点跳过。
 - **一键启动**：`loong.LoadAndRun(path, loong.WithWait())` 合并“读配置树 → 登记 → 激活 → 运行”，`WithWait` 时阻塞到 SIGINT/SIGTERM 再优雅关闭；底层 `LoadTree` / `New` / `Assemble` 仍可直接调用（测试、嵌入式场景）。
 - **Base 骨架**：loong 包提供可嵌入的 Base（空默认三方法 + Scope + Emit / Logger），组件嵌入后只需覆盖关心的阶段——核心接口保持最小，复杂度按需覆盖。
 - 运行期支持动态启用 / 禁用 / 替换实例。
@@ -141,13 +145,20 @@ Application Root
 | Run | Build 成功后（先父后子） | 启动服务（先接线后点火） |
 | Stop | Shutdown 时按 Run 逆序（子先父后） | 优雅关闭（关 server / db / flush） |
 
-**惰性与按需激活**：激活只有一条规则——**默认装配激活，yaml `lazy: true` 显式跳过**，组件是否提供服务不改变它。登记阶段只校验与建索引，不实例化；lazy 节点在首次 `Get[T]()`（service）或 `Scope.Activate` / `Kernel.Activate(id)` 时被激活。装配期激活保持"先全树 Build 再全树 Run"；lazy 路径是"实例化 + Build + Run 一体"，依赖 DAG 由 Build 期的 Get 推导（父组件 Build 时 Get 懒服务 → 先激活服务再继续），天然"先依赖后依赖方"，同时消除了对配置树声明顺序的依赖。激活由内核互斥保证单例幂等。
+**惰性与按需激活**：激活只有一条规则，而它作用在**子树**上——**默认装配激活，yaml `lazy: true` 让该节点及其下整棵子树都不激活**；组件是否提供服务不改变它。登记阶段只校验与建索引，不实例化。装配激活保持"先全树 Build 再全树 Run"；按需激活同样两阶段，只是范围是该节点锚定的子树：**先整棵子树 Build（父先子后），再整棵子树 Run（父先子后）**——子节点常依赖父节点 Build 出来的东西（路由挂在 router 上、监听在 server 上），"全 Build 完再统一 Run"正是这种接线的要求。锚点之下再标 `lazy` 的节点是它自己的决定，不在级联范围内，需要时单独激活。
+
+触发按需激活的三种途径一致：`Scope.Activate(id, args)`（父节点定义子节点的激活，args 经 `Scope.Args` 只交给锚点，子树继承激活而不继承参数）、`Kernel.Activate(id)`、以及命中未激活 provider 的 `Get[T]()`。激活由内核互斥保证单例幂等：锚点缓存结果，级联中建起来的节点一并标记为已激活；子树起来一半失败时，已 Build 的部分按逆序 Stop 掉，失败信息点名子树里出错的那个节点。
+
+**构建期循环**：既然激活带动整棵子树，Build 期间的服务查找就可能启动一棵子树，而那棵子树的 Build 又需要"正在 Build 的这个节点"提供的服务（owlet 即此形：`owlet.runtime` Build 时要 tools 的 registry，而 tools 下的 dispatch 子节点要 runtime 的 coordinator）。这不是内核多试几次能解开的顺序问题——两个 Build 都得先完成，而谁也完成不了。内核的做法是拒绝把正在 Build 的节点再建一次并点名它：否则该组件会被静默实例化两份（提供服务的那份还会撞上服务表）。解在树里：**provider 声明在 consumer 之上**，先构建的一方把服务备好，后者的 Build 直接取到（`Get[T]()` 命中已注册的 provider，不再触发激活）。
+
+> 两点由此确定下来：① 读树而非跑树的视图（`Shutdown`、`Contributions[T]`、`NodeInfo`）走全树遍历，休眠子树照常列出——"树里有什么"不取决于有没有被激活；② 只想让某个子系统按需起来，就把 `lazy` 标在**子系统的根**上（owlet 的 `web` + `owlet.dash` 即此形），父节点 `Activate` 一次即可整棵起来。
 
 **配置树设计（YAML · 两段式解析）**：
 
-- 节点 schema 统一：`{type, id?, config?, children?}`，平台只解析这 4 个字段；`config` 是不透明字节（yaml.Node），原样传给对应组件，不再深入。
+- 节点 schema 统一：`{type, id?, desc?, lazy?, config?, children?}`；平台只解析这几个骨架字段，`config` 是不透明字节（yaml.Node），原样传给对应组件，不再深入；`desc` 供 CLI usage 等展示，`lazy` 表示以该节点为锚点的整棵子树默认不激活（激活时整棵按 build / run 两阶段起来）。
 - **根节点就是配置树的第一个节点**（无需 `root:` 包装键）；根通常是内核内置的 **`base` 容器**（无行为生命周期，`loong.Container` 注册），项目无需为纯容器根声明自定义组件。
 - **组件自描述（schema-per-component）**：组件注册自己的配置 struct（`WithConfig[T]`，元数据进 `Components()`：字段名 / 类型 / 可选性），Build 里用 `scope.Config[T]()` 解码——**严格模式**：未知字段报错并带节点 id（typo 在激活期暴露而非静默忽略）；无 config 块返回零值。使用者在写 yaml 前即可通过 `Components()` 查看组件接受哪些 key。
+- **实例视图（自省）**：`Kernel.Root()` / `Kernel.Node(id)` 返回 `NodeInfo{ID, Type, Desc, Lazy, ParentID, Children}`——装配后的只读结构视图，供 CLI usage、`tree` 子命令、管理页渲染；`Desc` 只回节点自己的声明（类型级回退是读取方的 `Describe(type)`），`ParentID` 够向上走。查询纯结构：不激活任何节点。
 - 平台永远不需要知道完整 schema → 新增组件只需注册自己的 struct，配置结构随组件自由变化，无需改平台。
 - 继承与覆盖优先级：实例 config（配置树声明）> 父组件 build 期增强（下行 props）> 组件默认值。
 - 环境差异（dev / prod）：v0.1 用 `${ENV}` 环境变量覆盖，不做多层配置合并。注意展开是**文本级**（YAML 解析前替换），值含 YAML 敏感字符（`:` `#` 引号）时需在配置里加引号。
@@ -198,7 +209,14 @@ children:
 - **多实例机制**：配置树里声明多个同 type 节点即可（id 唯一，缺省 id = type）；init() 注册的类型工厂每次调用返回**新实例**，各实例的 config / 事件 / 生命周期完全独立。
 - 实例配置 = 父链默认值 + 父节点覆盖 + 实例自身声明。
 - 例：用户体系在 Web 下表现为会话登录，在小程序下表现为 openid 登录；日志在 API 下输出 JSON、在 TUI 下输出 ANSI 彩色——组件本身不改，读父链下发的配置 / 角色决定行为。
-- **服务提供的约定**：服务的**唯一声明入口**是注册选项 `WithService[T](get)`——`get` 是取值函数，激活后从组件实例取出服务值，类型由泛型参数编译期固定（无 `any`、无运行期校验）。一个组件可声明多个服务（多次 `WithService`）。服务按「类型 → 节点 id」登记，**同类型允许多个提供者并存**（如 main / admin 两个 web 实例），不再有装配期唯一性约束。查找只通过 `Scope`：`scope.Get[T]()` 在唯一提供者时直接命中；多提供者时沿「自身 + 父链向上」取最近的声明者（组件挂在哪就属于哪，契合重用组件的父子约定），父链无匹配则报错提示 `GetFrom[T](id)` 按节点 id 显式取。惰性激活遵循同一优先级：多候选时只激活父链命中的节点。**激活与"是否提供服务"无关**——服务组件与其他组件一样默认装配激活，需要按需就在配置树标 `lazy: true`（首次查找时激活）；`TryGet / TryGetFrom` 报告错误，`Get / GetFrom` 返回零值；`Activate(id)` 可手动激活任意 lazy 节点。组件发现用 `loong.Components()`（type / desc / service 类型 / emits / config 元数据）。
+- **服务提供的约定**：服务的**唯一声明入口**是注册选项 `WithService[T](get)`——`get` 是取值函数，激活后从组件实例取出服务值，类型由泛型参数编译期固定（无 `any`、无运行期校验）。一个组件可声明多个服务（多次 `WithService`）。服务按「类型 → 节点 id」登记，**同类型允许多个提供者并存**（如 main / admin 两个 web 实例），不再有装配期唯一性约束。查找只通过 `Scope`：`scope.Get[T]()` 在唯一提供者时直接命中；多提供者时沿「自身 + 父链向上」取最近的声明者（组件挂在哪就属于哪，契合重用组件的父子约定），父链无匹配则报错提示 `GetFrom[T](id)` 按节点 id 显式取。**候选集合是树里所有「组件类型声明了该服务」的节点，与"是哪个组件类型声明的"无关**——同一服务类型被多个组件类型声明是合法的，查找只按节点判断，不存在"每类型取一个"的索引。`Kernel.Providers[T]()` 枚举这些候选节点的 id（即 `GetFrom[T](id)` 接受的 id），是纯结构查询：lazy 节点未激活也列出，查询本身不激活任何节点。惰性激活遵循同一优先级：多候选时只激活父链命中的节点。**激活与"是否提供服务"无关**——服务组件与其他组件一样默认装配激活，需要按需就在配置树标 `lazy: true`（首次查找时激活）；`TryGet / TryGetFrom` 报告错误，`Get / GetFrom` 返回零值；`Activate(id)` 可手动激活任意 lazy 节点。组件发现用 `loong.Components()`（type / desc / service 类型 / 贡献家族 / emits / config 元数据）。
+
+  两处补完：
+
+  - **可选服务**：`WithOptionalService[T](get)` 与 `WithService` 形状相同，差别只在 nil 的含义。必选服务取到 nil 是错误（组件过早返回），可选服务取到 nil 是答案——「本节点没有这种能力」，该节点记入 skip 表，之后的查找（`Providers`/`GetFrom`/按需激活都算）不再把它当提供者，于是"没配后端就没这个能力"不必再发明哨兵值。消费方用 `TryGet` 把"没有"当作一种结果。注意 lazy 节点在激活前无法预知，激活后才发现为空时该次查找仍报错，换个提供者用 `GetFrom[T](id)`。
+  - **依赖观测**：`Kernel.Consumers[T]()` 列出"实际取过 T"的节点 id（树序）。它记录的是运行事实而非声明：没跑过的 lazy 节点、查失败的调用都不出现，所以它是排障用的 trace，目录用途仍然找 `Providers[T]()`。
+
+- **能力贡献的约定**：`WithContributes[Kind]()` 让一个组件类型的节点把自己的 id 贡献进 `Kind` 家族（Kind 是 Go 类型，与 service key 同哲学，不会串味）；`Scope.Provide[Kind](name)` 补上运行期才知道的名字（如 MCP server 报回的工具名）。`Kernel.Contributions[Kind]()` 按「结构性（树序）→ 运行期（注册序）」列出全部名字，**纯结构**：声明了但还没激活的节点也在列，查询不激活任何东西——这正是它相对"拿 registry 当判定源"的价值：消费方解析一个子树提供了什么，不再依赖"提供者必须排在消费者之前"。一个名字只能有一个主：同一节点重申自己的名字是 no-op，别的节点抢占则就地报错（歧义与重复节点 id 是同一类错误，只有调用方分得清，因为是它选的名字）。
 - **装配失败清理**：Build / Run 阶段任一组件失败，已 Build 的组件会按逆序 Stop（释放 db / server 等资源），`Shutdown` 在未装配或装配失败后调用均为安全空操作。
 - **约束**：组件的可变部分必须走配置 / 接口，不能写死全局状态。
 

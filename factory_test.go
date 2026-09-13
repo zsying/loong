@@ -32,8 +32,10 @@ func TestRegisterComponentDuplicatePanics(t *testing.T) {
 
 // TestRegisterComponentDistinctNamesOK proves the duplicate guard does
 // not over-fire: different type names may freely register factories,
-// even when they declare the same service type (the lookup resolves
-// per node, and ambiguous lazy lookups report an error).
+// even when they declare the same service type — a service type is not
+// owned by the type that declared it first, and a lookup resolves among
+// the mounted nodes regardless of which type declared them (see
+// TestLazyLookupFindsTheProviderWhateverDeclaresIt).
 func TestRegisterComponentDistinctNamesOK(t *testing.T) {
 	RegisterComponent("loong.test.svc.a", newTestComponent,
 		WithService(func(c Component) *testService { return &testService{} }))
@@ -63,9 +65,6 @@ func registerForTest(name string, fn func() Component, opts ...ComponentOption) 
 	e := regEntry{factory: fn}
 	for _, o := range opts {
 		o(&e)
-	}
-	for _, sd := range e.services {
-		serviceOwners[sd.typ] = name
 	}
 	factories[name] = e
 }

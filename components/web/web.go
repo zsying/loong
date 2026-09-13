@@ -25,6 +25,9 @@ import (
 // belong here; static dirs, session secrets and account endpoints live
 // in the child components that provide them.
 type Config struct {
+	// Listen is the address to bind. Left empty, the node binds nothing
+	// (a Router used in-process, e.g. under httptest); a parent may also
+	// supply it at activation time — see Build.
 	Listen string `yaml:"listen"`
 	// TLS turns the listener into HTTPS. It is optional: an absent
 	// block serves plain HTTP, so a project behind a reverse proxy
@@ -56,6 +59,26 @@ func (w *Web) Build(scope *loong.Scope) error {
 	cfg, err := scope.Config[Config]()
 	if err != nil {
 		return err
+	}
+	// The address may also arrive as the activation argument. A node whose
+	// listen address only exists once the application has read its own
+	// user configuration cannot spell it in the tree — and the parent
+	// activating it is the one holding the value, so passing it along is
+	// the framework's parent-defines-child primitive rather than a second
+	// config mechanism. Being told twice is a mistake to report, not a
+	// precedence to resolve.
+	switch a := scope.Args.(type) {
+	case nil:
+	case string:
+		if a == "" {
+			return errors.New("web: activation argument is an empty listen address")
+		}
+		if cfg.Listen != "" {
+			return fmt.Errorf("web: listen address given both in config (%q) and as an activation argument (%q)", cfg.Listen, a)
+		}
+		cfg.Listen = a
+	default:
+		return fmt.Errorf("web: unsupported activation argument of type %T (want a listen address string)", scope.Args)
 	}
 	w.Base.Build(scope)
 	w.cfg = cfg

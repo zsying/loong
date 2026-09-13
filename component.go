@@ -3,6 +3,7 @@ package loong
 import (
 	"bytes"
 	"fmt"
+	"reflect"
 
 	"gopkg.in/yaml.v3"
 )
@@ -96,6 +97,20 @@ func (s *Scope) OnTyped[T any](name string, h func(T) error) {
 		}
 		return h(p)
 	})
+}
+
+// Provide contributes an extra name of kind T for this node: the case a
+// declaration cannot express, because the name does not exist until the
+// component runs — the tools a remote server reports, say. Once
+// provided, the name is part of what the node's subtree offers, and
+// nothing needs to be told where it came from.
+//
+// A node may re-affirm a name it already holds — its own id, or a name
+// it provided before — and that is a no-op. Claiming a name another
+// node holds is an error returned to the caller, which is the only one
+// that can tell the two apart: it chose the name.
+func (s *Scope) Provide[T any](name string) error {
+	return s.Kernel.provide(s.Node, reflect.TypeOf((*T)(nil)).Elem(), name)
 }
 
 // Config decodes the node's config block into T and returns it. An

@@ -1,7 +1,6 @@
 package loong
 
 import (
-	"log/slog"
 	"reflect"
 	"strings"
 )
@@ -9,27 +8,25 @@ import (
 // serviceDecl pairs a declared service type with the accessor that
 // pulls the value out of a component instance after it is built.
 type serviceDecl struct {
-	typ reflect.Type
-	get func(Component) any
+	typ      reflect.Type
+	get      func(Component) any
+	optional bool // nil accessor result means "serves nothing", not an error
 }
 
 // regEntry describes one registered component type: its factory plus
-// optional registration semantics (services, events, description).
+// optional registration semantics (services, contributions, events,
+// description).
 type regEntry struct {
-	factory    func() Component
-	services   []serviceDecl // services declared via WithService (may be several)
-	configType reflect.Type  // config struct declared via WithConfig
-	emits      []string      // event names this component emits (WithEvents)
-	desc       string        // human description for the component catalog (WithDesc)
+	factory     func() Component
+	services    []serviceDecl  // services declared via WithService (may be several)
+	contributes []reflect.Type // contribution kinds declared via WithContributes
+	configType  reflect.Type   // config struct declared via WithConfig
+	emits       []string       // event names this component emits (WithEvents)
+	desc        string         // human description for the component catalog (WithDesc)
 }
 
 // factories holds component type factories registered via init().
 var factories = map[string]regEntry{}
-
-// serviceOwners tracks which component type declares each service
-// type, to warn when two component types claim the same service type
-// (the lookup index keeps only one of them).
-var serviceOwners = map[reflect.Type]string{}
 
 // ComponentOption tweaks how a component type is registered.
 type ComponentOption func(*regEntry)
@@ -42,18 +39,63 @@ type ComponentOption func(*regEntry)
 //	    loong.WithService(func(c loong.Component) *Service { return c.(*Component).Service }),
 //	)
 //
-// A component may declare several services (one WithService each).
-// Activation is orthogonal: like any component, a service component is
-// activated at assembly unless its node is marked lazy in the config
-// tree, in which case the first lookup (Get/GetFrom) activates it on
-// demand. The accessor's return type is checked at compile time by the
-// generic parameter, so no runtime type assertion is needed.
+// A component may declare several services (one WithService each), and
+// one service type may be declared by several component types — the
+// declaration is per type, resolution per node, so mounting two of them
+// gives two providers rather than a conflict. Activation is
+// orthogonal: like any component, a service component is activated at
+// assembly unless its node is marked lazy in the config tree, in which
+// case the first lookup (Get/GetFrom) activates it on demand. The
+// accessor's return type is checked at compile time by the generic
+// parameter, so no runtime type assertion is needed.
 func WithService[T any](get func(Component) T) ComponentOption {
+	return withService(get, false)
+}
+
+// WithOptionalService is WithService for a service that may not exist.
+// The accessor has the same shape; what changes is what a nil value
+// means. For a required service it is a mistake — the component
+// returned before it was ready — and it fails the activation. For an
+// optional one it is an answer: this node serves nothing of type T, and
+// lookups skip it exactly as if it had declared nothing, so "no backend
+// configured, no such capability" needs no sentinel value and no error
+// field for consumers to unpack.
+//
+// A consumer of an optional service therefore resolves it with TryGet
+// and treats the error as one of the outcomes (see WithContributes for
+// the capabilities a node holds without a value at all).
+func WithOptionalService[T any](get func(Component) T) ComponentOption {
+	return withService(get, true)
+}
+
+func withService[T any](get func(Component) T, optional bool) ComponentOption {
 	return func(e *regEntry) {
 		e.services = append(e.services, serviceDecl{
-			typ: reflect.TypeOf((*T)(nil)).Elem(),
-			get: func(c Component) any { return get(c) },
+			typ:      reflect.TypeOf((*T)(nil)).Elem(),
+			get:      func(c Component) any { return get(c) },
+			optional: optional,
 		})
+	}
+}
+
+// WithContributes declares that nodes of this component type contribute
+// an item of kind T, named by the node's own id:
+//
+//	loong.RegisterComponent("tool", factory,
+//	    loong.WithContributes[ToolName](),
+//	)
+//
+// The kind is a Go type, exactly as a service key is, so two families of
+// contributions never mix and a typo cannot pass for one; a type may
+// declare several kinds. T is only a name — no value is involved, and
+// that is the difference from WithService: a contribution is a fact
+// about the tree, known from the skeleton, so listing what a subtree
+// contributes neither builds nor runs anything that declares it. Names
+// that cannot exist before the component runs (a remote server's tool
+// list, say) are registered from inside Build with Scope.Provide.
+func WithContributes[T any]() ComponentOption {
+	return func(e *regEntry) {
+		e.contributes = append(e.contributes, reflect.TypeOf((*T)(nil)).Elem())
 	}
 }
 
@@ -98,13 +140,6 @@ func RegisterComponent(typeName string, factory func() Component, opts ...Compon
 	for _, o := range opts {
 		o(&e)
 	}
-	for _, sd := range e.services {
-		if prev, ok := serviceOwners[sd.typ]; ok && prev != typeName {
-			slog.Warn("loong: service type already declared by another component type",
-				"type", sd.typ.String(), "prev", prev, "now", typeName)
-		}
-		serviceOwners[sd.typ] = typeName
-	}
 	factories[typeName] = e
 }
 
@@ -115,6 +150,7 @@ type ComponentMeta struct {
 	Desc         string        // WithDesc description
 	Service      bool          // exposes at least one service
 	ServiceTypes []string      // declared service types, e.g. ["*user.Service"]
+	Contributes  []string      // contribution kinds declared via WithContributes
 	Emits        []string      // event names declared via WithEvents
 	ConfigType   string        // declared config struct name (WithConfig)
 	ConfigFields []ConfigField // config keys with types and optionality
@@ -147,11 +183,16 @@ func Components() []ComponentMeta {
 		for _, sd := range e.services {
 			svcTypes = append(svcTypes, sd.typ.String())
 		}
+		kinds := make([]string, 0, len(e.contributes))
+		for _, kind := range e.contributes {
+			kinds = append(kinds, kind.String())
+		}
 		out = append(out, ComponentMeta{
 			Type:         name,
 			Desc:         e.desc,
 			Service:      len(e.services) > 0,
 			ServiceTypes: svcTypes,
+			Contributes:  kinds,
 			Emits:        e.emits,
 			ConfigType:   cfgType,
 			ConfigFields: cfgFields,
