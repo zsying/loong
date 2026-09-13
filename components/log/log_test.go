@@ -173,7 +173,7 @@ func TestSetWriterRedirectsTheProcessDefault(t *testing.T) {
 // otherwise only show up in the consumer.
 func TestLogRegistersAService(t *testing.T) {
 	for _, m := range loong.Components() {
-		if m.Type != "log" {
+		if m.Type != "loong.log" {
 			continue
 		}
 		if !m.Service {
@@ -187,5 +187,5 @@ func TestLogRegistersAService(t *testing.T) {
 		t.Errorf("service types = %v, want *log.Log", m.ServiceTypes)
 		return
 	}
-	t.Fatal(`component type "log" is not registered`)
+	t.Fatal(`component type "loong.log" is not registered`)
 }

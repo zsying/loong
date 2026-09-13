@@ -1,14 +1,20 @@
 // Package cli provides the CLI building blocks for loong applications.
 // It follows the same pattern as the web channel: a cli master
-// component (type "cli", activated at assembly like any non-lazy
+// component (type "loong.cli", activated at assembly like any non-lazy
 // node) parses the command line and activates the matching child
-// command, and subcommand components (cli.list, cli.new, ...) mount
-// under it as lazy nodes. The activation chain is pure framework —
+// command, and subcommand components (loong.cli.list, loong.cli.new, ...)
+// mount under it as lazy nodes. The activation chain is pure framework —
 // every level calls scope.Activate(child, args), passing arguments
 // through scope.Args — so no dispatch logic lives outside the
 // components. Any loong application can mount these components and
 // get a component-driven CLI; see examples/cli for the complete
 // template (embedded or file-based config tree, any entry style).
+//
+// Command names vs node ids: a node id is globally unique, but a
+// command token is matched per parent — exactly against the child id,
+// else against the id's tail (`config.show` answers `show`). Two
+// groups can therefore each mount a `show` without colliding; a
+// token claimed by two siblings fails the master's/group's Build.
 package cli
 
 import (
@@ -32,7 +38,7 @@ var ErrUsage = errors.New("cli: usage error")
 //
 // Its behavior is configured through the config block (see Config):
 //
-//	type: cli
+//	type: loong.cli
 //	config:
 //	  default: tui      # bare invocation activates this child instead of usage
 //	  pre: globals      # child activated once before the first command
@@ -82,6 +88,9 @@ func (c *Component) Build(ctx *loong.Scope) error {
 			spellingOwner[s] = name
 		}
 	}
+	if err := checkCommandTokens(ctx.Node); err != nil {
+		return err
+	}
 	if cfg.Pre != "" && !hasChild(ctx.Node, cfg.Pre) {
 		return fmt.Errorf("cli: pre %q is not a child of %q", cfg.Pre, ctx.Node.ID)
 	}
@@ -106,19 +115,28 @@ func (c *Component) masterRun(ctx *loong.Scope, args []string) error {
 	if err != nil {
 		return err
 	}
-	cmdID, rest := selectCommand(g.Rest)
-	if cmdID == "" {
+	token, rest := selectCommand(g.Rest)
+	// cmdID is the node id to activate: for an argv token, the child
+	// the token names (exact id, else id tail); for a bare invocation
+	// with a default configured, the default's own id.
+	var cmdID string
+	if token == "" {
 		if c.cfg.Default == "" {
 			return usage(ctx, c.cfg.Pre)
 		}
 		cmdID, rest = c.cfg.Default, g.Rest
-	} else if cmdID == "help" && !hasChild(ctx.Node, "help") {
+	} else if child := matchChild(ctx.Node, token); child == nil {
 		// A help token with no command claiming it prints the usage
 		// tree. Like every usage path, no pre runs and nothing
 		// activates.
-		return usage(ctx, c.cfg.Pre)
-	} else if cmdID == c.cfg.Pre {
-		return fmt.Errorf("cli: %q is the pre node, not a command", cmdID)
+		if token == "help" {
+			return usage(ctx, c.cfg.Pre)
+		}
+		return fmt.Errorf("cli: unknown command %q", token)
+	} else if child.ID == c.cfg.Pre {
+		return fmt.Errorf("cli: %q is the pre node, not a command", token)
+	} else {
+		cmdID = child.ID
 	}
 	if c.cfg.Pre != "" {
 		// Fail-fast: a pre failure aborts the whole activation chain —
@@ -150,7 +168,7 @@ func (c *Component) helpRequested(args []string) bool {
 }
 
 func init() {
-	loong.RegisterComponent("cli", func() loong.Component { return &Component{} },
+	loong.RegisterComponent("loong.cli", func() loong.Component { return &Component{} },
 		loong.WithDesc("CLI master: parses the command line and activates the command"),
 	)
 }
@@ -207,15 +225,16 @@ const (
 // so `daemon <start, stop>` is a true statement about the argv. Every
 // other node's children are mounted components — a command that mounts
 // a server under itself, say — and listing those would advertise
-// commands that do not exist.
+// commands that do not exist. Names shown are command names — id
+// tails — not raw node ids.
 func writeCommands(w io.Writer, cmds []*loong.Node, color bool) {
 	heads := make([]string, len(cmds))
 	descs := make([]string, len(cmds))
 	width := 0
 	for i, c := range cmds {
-		head := c.ID
+		head := commandName(c.ID)
 		if c.Type == GroupType && len(c.Children) > 0 {
-			head += " <" + groupNames(c.Children) + ">"
+			head += " <" + strings.Join(commandNames(c), ", ") + ">"
 		}
 		heads[i] = head
 		if len(head) > width {
@@ -263,12 +282,4 @@ func hasChild(n *loong.Node, id string) bool {
 		}
 	}
 	return false
-}
-
-func groupNames(children []*loong.Node) string {
-	names := make([]string, 0, len(children))
-	for _, c := range children {
-		names = append(names, c.ID)
-	}
-	return strings.Join(names, ", ")
 }

@@ -44,16 +44,16 @@ func (b *Base) Logger() *slog.Logger {
 
 // Container is the generic root/container component: it embeds Base
 // and has no behavior beyond the no-op lifecycle. It is registered as
-// type "base" (see the package init below), so a config tree root
+// type "loong.base" (see the package init below), so a config tree root
 // needs no custom component when it carries no logic of its own —
-// `type: base` in the yaml replaces the boilerplate "type app struct
+// `type: loong.base` in the yaml replaces the boilerplate "type app struct
 // { loong.Base }" every project used to declare.
 type Container struct {
 	Base
 }
 
 func init() {
-	RegisterComponent("base", func() Component { return &Container{} },
+	RegisterComponent("loong.base", func() Component { return &Container{} },
 		WithDesc("generic container/root with a no-op lifecycle"),
 	)
 }
@@ -75,6 +75,6 @@ func init() {
 // embedding Base.
 type Func func(ctx *Scope) error
 
-func (f Func) Build(*Scope) error { return nil }
+func (f Func) Build(*Scope) error   { return nil }
 func (f Func) Run(ctx *Scope) error { return f(ctx) }
-func (f Func) Stop(*Scope) error   { return nil }
+func (f Func) Stop(*Scope) error    { return nil }

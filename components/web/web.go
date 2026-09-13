@@ -180,7 +180,7 @@ func (w *Web) Stop(*loong.Scope) error {
 }
 
 func init() {
-	loong.RegisterComponent("web", func() loong.Component { return &Web{} },
+	loong.RegisterComponent("loong.web", func() loong.Component { return &Web{} },
 		loong.WithConfig[Config](),
 		loong.WithService(func(c loong.Component) *Router { return c.(*Web).router }),
 		loong.WithDesc("web channel: HTTP server with a Router registration surface"),

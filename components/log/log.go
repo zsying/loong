@@ -152,7 +152,7 @@ func colorFor(w io.Writer) bool {
 }
 
 func init() {
-	loong.RegisterComponent("log", func() loong.Component { return &Log{} },
+	loong.RegisterComponent("loong.log", func() loong.Component { return &Log{} },
 		loong.WithConfig[Config](),
 		loong.WithService(func(c loong.Component) *Log { return c.(*Log) }),
 		loong.WithDesc("process-wide logging via slog, console/json formats"),

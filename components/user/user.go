@@ -191,7 +191,7 @@ func (c *Component) Stop(*loong.Scope) error {
 }
 
 func init() {
-	loong.RegisterComponent("user", func() loong.Component { return &Component{} },
+	loong.RegisterComponent("loong.user", func() loong.Component { return &Component{} },
 		loong.WithConfig[Config](),
 		loong.WithService(func(c loong.Component) *Service { return c.(*Component).Service }),
 		loong.WithDesc("user system: accounts, password auth, openid login"),

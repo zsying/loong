@@ -80,7 +80,7 @@ func TestNonLazyProviderActivatedOnce(t *testing.T) {
 	provBuilds, provRuns, provStops := &actCounters.builds, &actCounters.runs, &actCounters.stops
 
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.actconsumer", ID: "consumer"},
 			{Type: "test.actprov", ID: "provider"},
@@ -125,7 +125,7 @@ func TestNonLazyProviderDeclaredBeforeConsumer(t *testing.T) {
 	provBuilds, provRuns, provStops := &actCounters.builds, &actCounters.runs, &actCounters.stops
 
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.actprov", ID: "provider"},
 			{Type: "test.actconsumer", ID: "consumer"},

@@ -66,7 +66,7 @@ func TestABuildTimeCycleIsReportedInsteadOfBuiltTwice(t *testing.T) {
 
 	k := New()
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.cycA", ID: "first"},
 			{Type: "test.cycB", ID: "second", Children: []*Node{
@@ -107,7 +107,7 @@ func TestDeclarationOrderBreaksABuildTimeCycle(t *testing.T) {
 
 	k := New()
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.cycB", ID: "second", Children: []*Node{
 				{Type: "test.askA", ID: "inner"},

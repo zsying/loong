@@ -1,6 +1,6 @@
 # loong
 
-A general-purpose software platform built on a **component tree**. Bring loong into your project, mount your own business components, and get user auth, config, logging, web and wechat channels out of the box — so you stop rebuilding the same plumbing for every new project and focus on your business.
+A general-purpose software platform built on a **component tree**. Bring loong into your project, mount your own business components, and get loong.user loong.auth, config, logging, loong.web and wechat channels out of the box — so you stop rebuilding the same plumbing for every new project and focus on your business.
 
 ## Why loong
 
@@ -22,15 +22,15 @@ Every new software project starts by re-implementing the same parts: login, conf
 - **Lazy activation** — activation is one rule, and it is about subtrees: a node is built at startup unless it is marked `lazy: true`, and `lazy: true` turns off everything mounted under it. Activating the node — `Scope.Activate`, `Kernel.Activate`, or a service lookup that lands on it — brings that subtree up in the two phases assembly uses (every Build, parent before child, before any Run), which is the order a child wired to what its parent built needs. A descendant marked lazy is a decision of its own and is activated separately; a subtree that fails to come up stops what it did build, in reverse. Assembly is that same activation, applied to the root, so what it brought up counts as active: asking for it again is a no-op. A Build that needs a service from a node whose own Build is still on the stack is reported as the build-time cycle it is — declare the provider above the consumer — instead of instantiating that component a second time.
 - **Component catalog** — `loong.Components()` lists every registered type with its description, services, contribution kinds, activation mode and emitted events, so consumers can discover and wire components without reading source. `Kernel.Root()` / `Kernel.Node(id)` give the assembled tree the same way: id, type, description, lazy flag, parent, declared services, contributed names and children — the instance view a `tree` command or admin page renders from. `Kernel.Consumers[T]()` completes the picture from the other side: who actually resolved T (a trace, not a declaration — a lookup that found nothing records nothing).
 - **Single-process monolith** — the whole tree runs in one process; simple to debug, zero network overhead between components.
-- **Zero-framework web channel** — stdlib `net/http` (Go 1.22 routing patterns) behind a friendly `*web.Router` registration surface; sessions (`auth`), account API (`web.account`) and static hosting (`web.static`) are separate optional components. Middleware is plain `func(http.Handler) http.Handler`: `Recover`, request logging and CORS ship with the channel, and the wrappers stay transparent so streaming (SSE) and protocol upgrades (WebSocket) still work. HTTPS is opt-in via a `tls: {cert, key}` block; route conflicts fail assembly instead of panicking.
-- **Owner-scoped process logger** — the `log` component installs the process-wide `slog` default and is the only thing that writes that slot, so where records go is a tree declaration (`output: stdout` or `stderr`, `format: console` or `json`) rather than a guess. An application steers the logger it mounted instead of stacking a second default over it: `SetLevel` turns a verbose flag into a level change that applies to the next record, and `SetWriter` takes a stream back for a channel that needs one (a TUI's screen, a CLI's stdout) — the level is a `slog.LevelVar` the handler reads per record, so neither knob rebuilds anything.
+- **Zero-framework loong.web channel** — stdlib `net/http` (Go 1.22 routing patterns) behind a friendly `*web.Router` registration surface; sessions (`loong.auth`), account API (`loong.web.account`) and static hosting (`loong.web.static`) are separate optional components. Middleware is plain `func(http.Handler) http.Handler`: `Recover`, request logging and CORS ship with the channel, and the wrappers stay transparent so streaming (SSE) and protocol upgrades (WebSocket) still work. HTTPS is opt-in via a `tls: {cert, key}` block; route conflicts fail assembly instead of panicking.
+- **Owner-scoped process logger** — the `loong.log` component installs the process-wide `slog` default and is the only thing that writes that slot, so where records go is a tree declaration (`output: stdout` or `stderr`, `format: console` or `json`) rather than a guess. An application steers the logger it mounted instead of stacking a second default over it: `SetLevel` turns a verbose flag into a level change that applies to the next record, and `SetWriter` takes a stream back for a channel that needs one (a TUI's screen, a CLI's stdout) — the level is a `slog.LevelVar` the handler reads per record, so neither knob rebuilds anything.
 
 ## Repository layout
 
 ```
 loong/
 ├── *.go            # kernel (package loong, the platform itself)
-├── components/     # platform components: log, user, auth, web, cli
+├── components/     # platform components: loong.log, loong.user, loong.auth, loong.web, loong.cli
 ├── examples/       # sample projects
 └── docs/           # design documents
 ```
@@ -49,20 +49,20 @@ LOONG_JWT_SECRET=dev-secret go run ./examples/hello ./examples/hello/loong.yaml
 Then exercise the endpoints:
 
 ```bash
-# register a user
-curl -X POST localhost:8080/api/auth/register \
+# register a loong.user
+curl -X POST localhost:8080/api/loong.auth/register \
   -H "Content-Type: application/json" \
   -d '{"username":"john","password":"secret123","nickname":"John"}'
 
 # login and get a JWT
-curl -X POST localhost:8080/api/auth/login \
+curl -X POST localhost:8080/api/loong.auth/login \
   -H "Content-Type: application/json" \
   -d '{"username":"john","password":"secret123"}'
 
 # protected endpoint (requires "Authorization: Bearer <token>")
 curl localhost:8080/api/me -H "Authorization: Bearer <token>"
 
-# business component mounted under the web channel
+# business component mounted under the loong.web channel
 curl localhost:8080/api/greet
 ```
 
@@ -70,7 +70,7 @@ Press `Ctrl+C` to shut down gracefully (components are stopped in reverse Run or
 
 ## CLI
 
-CLI applications are built on the platform itself, using the **parent-defined activation** primitive (`scope.Activate(child, args)` — a parent activates one of its direct children and arguments flow through `scope.Args`). The `components/cli` package provides the core: a **cli master** (parses the command line and activates the matching child command), a generic `cli.group` container for multi-level commands, and argument helpers. The optional `components/cli/commands` package adds platform commands (`cli.list` / `cli.new` / `cli.tree`) — import it only if you want them. A CLI is a full loong app, so it also mounts the `log` component for logging. `examples/cli` is the working template (master + log + custom business commands + multi-level groups).
+CLI applications are built on the platform itself, using the **parent-defined activation** primitive (`scope.Activate(child, args)` — a parent activates one of its direct children and arguments flow through `scope.Args`). The `components/cli` package provides the core: a **loong.cli master** (parses the command line and activates the matching child command), a generic `loong.cli.group` container for multi-level commands, and argument helpers. The optional `components/cli/commands` package adds platform commands (`loong.cli.list` / `loong.cli.new` / `loong.cli.tree`) — import it only if you want them. A CLI is a full loong app, so it also mounts the `loong.log` component for logging. `examples/cli` is the working template (master + loong.log + custom business commands + multi-level groups).
 
 ```bash
 go run ./examples/cli list                # component catalog of *this* app (platform + business)
@@ -83,7 +83,7 @@ go run ./examples/cli config show theme   # multi-level command: group "config" 
 
 ```go
 import (
-    "github.com/zsying/loong/components/cli"            // master + cli.group
+    "github.com/zsying/loong/components/cli"            // master + loong.cli.group
     _ "github.com/zsying/loong/components/cli/commands" // optional: list/new/tree
     _ "github.com/zsying/loong/components/log"          // logging, like any loong app
 )
@@ -92,20 +92,20 @@ import (
 A CLI is just a loong app — mount the components in a config tree (embedded via `go:embed`, or as a file with `loong.LoadAndRun`), and main only starts the app and maps errors to exit codes. Both entry styles are shown in `examples/cli`:
 
 ```go
-//go:embed cli.yaml
+//go:embed loong.cli.yaml
 var cliYAML []byte
 
-root, err := loong.Parse(cliYAML) // or loong.LoadAndRun("cli.yaml") for a file
+root, err := loong.Parse(cliYAML) // or loong.LoadAndRun("loong.cli.yaml") for a file
 if err != nil { os.Exit(1) }
 k := loong.New()
 if err := k.Assemble(root); err != nil { // the master runs the command here
     _ = k.Shutdown()
-    os.Exit(2) // if errors.Is(err, cli.ErrUsage) — see examples/cli
+    os.Exit(2) // if errors.Is(err, loong.cli.ErrUsage) — see examples/cli
 }
 _ = k.Shutdown()
 ```
 
-Adding a command means registering a new component type and a node in `cli.yaml` — no dispatch code anywhere.
+Adding a command means registering a new component type and a node in `loong.cli.yaml` — no dispatch code anywhere.
 
 ## Writing a component
 
@@ -127,7 +127,7 @@ func (g *greet) Build(ctx *loong.Scope) error {
     // 2. wire dependencies / register routes through parent services
     if r := ctx.Get[*web.Router](); r != nil {
         r.Get("/api/greet", func(w http.ResponseWriter, req *http.Request) {
-            web.WriteJSON(w, http.StatusOK, map[string]string{"msg": "greetings"})
+            loong.web.WriteJSON(w, http.StatusOK, map[string]string{"msg": "greetings"})
         })
     }
     return nil
@@ -141,30 +141,30 @@ func init() {
 }
 ```
 
-Mount the business component under a web channel and add the platform
+Mount the business component under a loong.web channel and add the platform
 capabilities you want as components in your config tree (`loong.yaml`).
-The root can be the kernel-provided `base` container — a no-op root
+The root can be the kernel-provided `loong.base` container — a no-op root
 that needs no custom component declaration:
 
 ```yaml
-type: base
+type: loong.base
 config:
   name: myproject
 children:
-  - type: user
+  - type: loong.user
     id: users
-  - type: auth                # session tokens (JWT): issue/verify + Guard
+  - type: loong.auth                # session tokens (JWT): issue/verify + Guard
     id: sessions
     config:
       secret: ${JWT_SECRET}
-  - type: web
+  - type: loong.web
     id: main
     config:
       listen: ":8080"
     children:
-      - type: web.account     # optional: register / login / me over user + auth
+      - type: loong.web.account     # optional: register / login / me over loong.user + loong.auth
         id: account
-      - type: web.static      # optional: static hosting + SPA fallback
+      - type: loong.web.static      # optional: static hosting + SPA fallback
         id: site
         config:
           dir: ./dist
@@ -181,4 +181,4 @@ children:
 
 ## Status
 
-v0.1.0 — the component-tree kernel with log, user, auth, web and cli components, plus two working samples. Wechat channels, TUI and extension components (mail, unionid bridging, ...) are on the roadmap. Requires Go 1.27.
+v0.1.0 — the component-tree kernel with loong.log, loong.user, loong.auth, loong.web and loong.cli components, plus two working samples. Wechat channels, TUI and extension components (mail, unionid bridging, ...) are on the roadmap. Requires Go 1.27.

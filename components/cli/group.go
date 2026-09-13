@@ -12,7 +12,7 @@ import (
 // usage listing reads it for: a group renders its children inline
 // (`daemon <start, stop>`), every other node's children are mounted
 // components and stay out of the listing.
-const GroupType = "cli.group"
+const GroupType = "loong.cli.group"
 
 // Group is a lazy container for command groups: it holds subcommand
 // nodes in the tree (e.g. `config` with `show`/`set` children). Its
@@ -23,6 +23,15 @@ type Group struct {
 	loong.Base
 }
 
+// Build validates the group's command names: two children must not
+// answer the same argv token (e.g. `config.show` and `cache.show`
+// mounted under one group both claim `show`). The check lives here
+// and in the master's Build so a collision fails at assembly, not the
+// first time the user types the command.
+func (g *Group) Build(ctx *loong.Scope) error {
+	return checkCommandTokens(ctx.Node)
+}
+
 func (g *Group) Run(ctx *loong.Scope) error {
 	args, _ := ctx.Args.([]string)
 	// Dual Args contract: a master with flags peeling may hand down
@@ -31,9 +40,13 @@ func (g *Group) Run(ctx *loong.Scope) error {
 		args = gl.Rest
 	}
 	if len(args) == 0 {
-		return fmt.Errorf("%w: %s requires one of [%s]", ErrUsage, ctx.Node.ID, strings.Join(childIDs(ctx.Node), ", "))
+		return fmt.Errorf("%w: %s requires one of [%s]", ErrUsage, ctx.Node.ID, strings.Join(commandNames(ctx.Node), ", "))
 	}
-	return ctx.Activate(args[0], args[1:])
+	child := matchChild(ctx.Node, args[0])
+	if child == nil {
+		return fmt.Errorf("%w: %s has no command %q (one of [%s])", ErrUsage, ctx.Node.ID, args[0], strings.Join(commandNames(ctx.Node), ", "))
+	}
+	return ctx.Activate(child.ID, args[1:])
 }
 
 func init() {
@@ -42,10 +55,56 @@ func init() {
 	)
 }
 
-func childIDs(n *loong.Node) []string {
-	ids := make([]string, 0, len(n.Children))
-	for _, c := range n.Children {
-		ids = append(ids, c.ID)
+// commandName is the name a node answers to on the command line: the
+// tail of its id (the segment after the last dot). Node ids are
+// globally unique, so two groups can each mount a `show` as
+// `config.show` and `cache.show`; the tail is what disambiguates them
+// per group. A single-segment id is its own name.
+func commandName(id string) string {
+	if i := strings.LastIndex(id, "."); i >= 0 {
+		return id[i+1:]
 	}
-	return ids
+	return id
+}
+
+// matchChild returns the child of n that the argv token names: an
+// exact id match wins (so a token may always spell the full id), and
+// otherwise the token matches the child's command name — the id's
+// tail. Build-time token checks guarantee at most one child matches.
+func matchChild(n *loong.Node, token string) *loong.Node {
+	var byTail *loong.Node
+	for _, c := range n.Children {
+		if c.ID == token {
+			return c
+		}
+		if commandName(c.ID) == token && byTail == nil {
+			byTail = c
+		}
+	}
+	return byTail
+}
+
+// checkCommandTokens verifies that no two children of n answer the
+// same argv token — a collision between an exact id and another
+// child's tail counts too (children `show` and `config.show` under one
+// group both claim `show`).
+func checkCommandTokens(n *loong.Node) error {
+	owner := make(map[string]string)
+	for _, c := range n.Children {
+		for _, tok := range []string{c.ID, commandName(c.ID)} {
+			if prev, dup := owner[tok]; dup && prev != c.ID {
+				return fmt.Errorf("cli: command token %q of %q collides with %q under %q", tok, c.ID, prev, n.ID)
+			}
+			owner[tok] = c.ID
+		}
+	}
+	return nil
+}
+
+func commandNames(n *loong.Node) []string {
+	names := make([]string, 0, len(n.Children))
+	for _, c := range n.Children {
+		names = append(names, commandName(c.ID))
+	}
+	return names
 }

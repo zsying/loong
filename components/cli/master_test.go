@@ -53,7 +53,7 @@ func cliNode(t *testing.T, cfg string, children ...*loong.Node) (*loong.Node, *l
 			t.Fatalf("unmarshal config: %v", err)
 		}
 	}
-	n := &loong.Node{Type: "cli", ID: "cli", Lazy: true, Config: raw, Children: children}
+	n := &loong.Node{Type: "loong.cli", ID: "cli", Lazy: true, Config: raw, Children: children}
 	return n, &loong.Scope{Node: n, Raw: raw}
 }
 
@@ -405,7 +405,7 @@ func TestGroupUnwrapsGlobals(t *testing.T) {
 	root := &loong.Node{
 		Type: "test.parent", ID: "root",
 		Children: []*loong.Node{
-			{Type: "cli.group", ID: "config", Lazy: true, Children: []*loong.Node{
+			{Type: "loong.cli.group", ID: "config", Lazy: true, Children: []*loong.Node{
 				{Type: "test.show", ID: "show", Lazy: true},
 			}},
 		},
@@ -432,7 +432,7 @@ func TestGroupUnwrapsGlobals(t *testing.T) {
 func TestUsageRendering(t *testing.T) {
 	nodes := []*loong.Node{
 		{Type: "owlet.tui", ID: "tui", Desc: "Start the interactive TUI"},
-		{Type: "cli.group", ID: "daemon", Children: []*loong.Node{
+		{Type: "loong.cli.group", ID: "daemon", Children: []*loong.Node{
 			{Type: "test.rec", ID: "start", Lazy: true},
 		}}, // no node desc -> falls back to the type's WithDesc
 		{Type: "test.rec", ID: "bare"}, // no desc anywhere -> no second column
@@ -481,7 +481,7 @@ func TestUsageRenderingKeepsMountedChildrenOutOfTheListing(t *testing.T) {
 	nodes := []*loong.Node{
 		{Type: "test.rec", ID: "dashboard", Desc: "Open the web dashboard",
 			Children: []*loong.Node{
-				{Type: "web", ID: "dashweb", Lazy: true, Children: []*loong.Node{
+				{Type: "loong.web", ID: "dashweb", Lazy: true, Children: []*loong.Node{
 					{Type: "test.rec", ID: "dash"},
 				}},
 			}},
@@ -501,7 +501,7 @@ func TestUsageRenderingKeepsMountedChildrenOutOfTheListing(t *testing.T) {
 // becomes the program header, blank lines separate the sections, and
 // a master without a Desc skips the header entirely.
 func TestWriteUsageLayout(t *testing.T) {
-	master := &loong.Node{Type: "cli", ID: "cli", Desc: "Owlet - AI harness toolset",
+	master := &loong.Node{Type: "loong.cli", ID: "cli", Desc: "Owlet - AI harness toolset",
 		Children: []*loong.Node{
 			{Type: "test.rec", ID: "globals", Lazy: true},
 			{Type: "test.rec", ID: "tui", Lazy: true, Desc: "Start the interactive TUI"},
@@ -520,7 +520,7 @@ func TestWriteUsageLayout(t *testing.T) {
 		t.Errorf("layout mismatch:\ngot  %q\nwant %q", buf.String(), want)
 	}
 
-	bare := &loong.Node{Type: "cli", ID: "cli",
+	bare := &loong.Node{Type: "loong.cli", ID: "cli",
 		Children: []*loong.Node{{Type: "test.rec", ID: "tui", Lazy: true}}}
 	buf.Reset()
 	if err := writeUsage(&buf, bare, "", false); err != nil {

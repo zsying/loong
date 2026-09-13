@@ -1,4 +1,4 @@
-// Package account provides the optional "web.account" component: the
+// Package account provides the optional "loong.web.account" component: the
 // standard account HTTP API — register / login / me — wiring the user
 // and auth services onto a parent web channel's Router. Projects that
 // authenticate differently (openid-only, external IdP) skip it and
@@ -31,14 +31,14 @@ func (c *Account) Build(ctx *loong.Scope) error {
 	c.users = ctx.Get[*user.Service]()
 	c.auth = ctx.Get[*auth.Service]()
 	if c.users == nil {
-		return errors.New("web.account: user service not mounted (add a user component)")
+		return errors.New("loong.web.account: user service not mounted (add a loong.user component)")
 	}
 	if c.auth == nil {
-		return errors.New("web.account: auth service not mounted (add an auth component)")
+		return errors.New("loong.web.account: auth service not mounted (add a loong.auth component)")
 	}
 	r := ctx.Get[*web.Router]()
 	if r == nil {
-		return errors.New("web.account: no web Router available (mount this component under a web node)")
+		return errors.New("loong.web.account: no web Router available (mount this component under a web node)")
 	}
 	r.Post("/api/auth/register", c.handleRegister)
 	r.Post("/api/auth/login", c.handleLogin)
@@ -112,7 +112,7 @@ func (c *Account) handleMe(w http.ResponseWriter, r *http.Request) {
 }
 
 func init() {
-	loong.RegisterComponent("web.account", func() loong.Component { return &Account{} },
+	loong.RegisterComponent("loong.web.account", func() loong.Component { return &Account{} },
 		loong.WithDesc("account API: register / login / me over user + auth (mount under web)"),
 	)
 }

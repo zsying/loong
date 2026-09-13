@@ -2,10 +2,10 @@ package loong
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
-	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -184,13 +184,13 @@ func TestParse(t *testing.T) {
 	}
 }
 
-// TestBaseContainer verifies the kernel-provided "base" container
+// TestBaseContainer verifies the kernel-provided "loong.base" container
 // serves as a no-op root: it assembles with children and runs without
 // any custom component declaration.
 func TestBaseContainer(t *testing.T) {
 	registerForTest("test.spy", func() Component { return &spy{r: &recorder{}} })
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{{Type: "test.spy", ID: "child", Lazy: true}},
 	}
 	k := New()
@@ -201,7 +201,7 @@ func TestBaseContainer(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Type != "base" || len(info.Children) != 1 {
+	if info.Type != "loong.base" || len(info.Children) != 1 {
 		t.Errorf("root info = %+v", info)
 	}
 	if err := k.Activate("child"); err != nil {

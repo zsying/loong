@@ -1,4 +1,4 @@
-// Package static provides the optional "web.static" component: static
+// Package static provides the optional "loong.web.static" component: static
 // file hosting with an optional SPA fallback, mounted on a parent web
 // channel's Router. A pure API backend simply does not mount it.
 package static
@@ -45,17 +45,17 @@ func (s *Static) Build(ctx *loong.Scope) error {
 		return err
 	}
 	if cfg.Dir == "" {
-		return errors.New("web.static: missing dir (usage: dir: ./public)")
+		return errors.New("loong.web.static: missing dir (usage: dir: ./public)")
 	}
 	if _, err := os.Stat(cfg.Dir); err != nil {
-		return fmt.Errorf("web.static: %w", err)
+		return fmt.Errorf("loong.web.static: %w", err)
 	}
 	prefix := cfg.Prefix
 	if prefix == "" {
 		prefix = "/"
 	}
 	if !strings.HasPrefix(prefix, "/") {
-		return fmt.Errorf("web.static: prefix %q must start with /", prefix)
+		return fmt.Errorf("loong.web.static: prefix %q must start with /", prefix)
 	}
 	// A prefix names a mount subtree: "/assets" registers "/assets/"
 	// so every path below it is served (a bare pattern without a
@@ -67,7 +67,7 @@ func (s *Static) Build(ctx *loong.Scope) error {
 	s.Base.Build(ctx)
 	r := ctx.Get[*web.Router]()
 	if r == nil {
-		return errors.New("web.static: no web Router available (mount this component under a web node)")
+		return errors.New("loong.web.static: no web Router available (mount this component under a web node)")
 	}
 	r.Handle("", mount, handler(cfg.Dir, mount, cfg.API, cfg.SPA))
 	return nil
@@ -117,7 +117,7 @@ func underPath(path, prefix string) bool {
 }
 
 func init() {
-	loong.RegisterComponent("web.static", func() loong.Component { return &Static{} },
+	loong.RegisterComponent("loong.web.static", func() loong.Component { return &Static{} },
 		loong.WithConfig[Config](),
 		loong.WithDesc("static file hosting with optional SPA fallback (mount under web)"),
 	)

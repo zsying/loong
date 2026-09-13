@@ -20,9 +20,9 @@ func cfgNode(t *testing.T, s string) yaml.Node {
 
 func TestRenderListText(t *testing.T) {
 	infos := []loong.ComponentMeta{
-		{Type: "web", Service: true, ServiceTypes: []string{"*web.Router"}, Emits: []string{"biz.*"}},
+		{Type: "loong.web", Service: true, ServiceTypes: []string{"*web.Router"}, Emits: []string{"biz.*"}},
 		{Type: "app"},
-		{Type: "log", ConfigFields: []loong.ConfigField{{Name: "level", Type: "string"}}},
+		{Type: "loong.log", ConfigFields: []loong.ConfigField{{Name: "level", Type: "string"}}},
 	}
 	out := renderListText(infos)
 	if !strings.HasPrefix(out, "TYPE") {
@@ -34,7 +34,7 @@ func TestRenderListText(t *testing.T) {
 		}
 	}
 	appAt := strings.Index(out, "\napp")
-	webAt := strings.Index(out, "\nweb")
+	webAt := strings.Index(out, "\nloong.web")
 	if appAt < 0 || webAt < 0 || appAt > webAt {
 		t.Errorf("rows not sorted by type:\n%s", out)
 	}
@@ -42,9 +42,9 @@ func TestRenderListText(t *testing.T) {
 
 func TestRenderListHTML(t *testing.T) {
 	out := renderListHTML([]loong.ComponentMeta{
-		{Type: "web", Service: true, ServiceTypes: []string{"*web.Router"}, Desc: "a <b>web</b>"},
+		{Type: "loong.web", Service: true, ServiceTypes: []string{"*web.Router"}, Desc: "a <b>web</b>"},
 	})
-	for _, want := range []string{"<!doctype html>", "<table", "<td>web</td>", "*web.Router", "&lt;b&gt;web&lt;/b&gt;"} {
+	for _, want := range []string{"<!doctype html>", "<table", "<td>loong.web</td>", "*web.Router", "&lt;b&gt;web&lt;/b&gt;"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("html missing %q:\n%s", want, out)
 		}
@@ -53,10 +53,10 @@ func TestRenderListHTML(t *testing.T) {
 
 func TestRenderTree(t *testing.T) {
 	root := &loong.Node{Type: "app", Config: cfgNode(t, "name: hello\n")}
-	web := &loong.Node{Type: "web", ID: "main", Config: cfgNode(t, "listen: :8080\n")}
+	web := &loong.Node{Type: "loong.web", ID: "main", Config: cfgNode(t, "listen: :8080\n")}
 	root.Children = []*loong.Node{web}
 	meta := map[string]loong.ComponentMeta{
-		"web": {Type: "web", Service: true},
+		"loong.web": {Type: "loong.web", Service: true},
 	}
 	out := renderTree(root, meta)
 	for _, want := range []string{"app", "name=hello", "web (main)", "[service]", "listen=:8080"} {

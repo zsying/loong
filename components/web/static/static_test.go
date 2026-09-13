@@ -32,10 +32,10 @@ func assemble(t *testing.T, dir, prefix, api string, spa bool) *web.Router {
 		spaY = "true"
 	}
 	root := &loong.Node{
-		Type: "base",
+		Type: "loong.base",
 		Children: []*loong.Node{
-			{Type: "web", ID: "main", Config: cfgNode(t, "listen: \"\"\n"), Children: []*loong.Node{
-				{Type: "web.static", ID: "static", Config: cfgNode(t, "dir: "+strconv.Quote(dir)+"\nprefix: "+strconv.Quote(prefix)+"\nspa: "+spaY+"\napi: "+strconv.Quote(api)+"\n")},
+			{Type: "loong.web", ID: "main", Config: cfgNode(t, "listen: \"\"\n"), Children: []*loong.Node{
+				{Type: "loong.web.static", ID: "static", Config: cfgNode(t, "dir: "+strconv.Quote(dir)+"\nprefix: "+strconv.Quote(prefix)+"\nspa: "+spaY+"\napi: "+strconv.Quote(api)+"\n")},
 			}},
 		},
 	}

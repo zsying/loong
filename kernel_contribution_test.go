@@ -57,13 +57,13 @@ func regContributionTypes() {
 func TestContributionsListsNamesInTreeOrder(t *testing.T) {
 	regContributionTypes()
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.cont", ID: "first", Lazy: true, Children: []*Node{
 				{Type: "test.cont", ID: "nested", Lazy: true},
 			}},
 			{Type: "test.cont2", ID: "other", Lazy: true},
-			{Type: "base", ID: "plain", Lazy: true},
+			{Type: "loong.base", ID: "plain", Lazy: true},
 		},
 	}
 	k := New()
@@ -97,10 +97,10 @@ func TestContributionsListsNamesInTreeOrder(t *testing.T) {
 func TestNodeInfoCarriesContributedNames(t *testing.T) {
 	regContributionTypes()
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.cont", ID: "a"},
-			{Type: "base", ID: "plain"},
+			{Type: "loong.base", ID: "plain"},
 		},
 	}
 	k := New()
@@ -133,7 +133,7 @@ func TestProvidedNamesJoinTheContributions(t *testing.T) {
 	t.Cleanup(func() { dynNames = nil })
 
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.cont", ID: "static"},
 			{Type: "test.dyn", ID: "mcp"},
@@ -167,7 +167,7 @@ func TestProvideRejectsAConflictingName(t *testing.T) {
 	t.Cleanup(func() { dynNames = nil })
 
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.cont", ID: "read"},
 			{Type: "test.dyn", ID: "mcp"},
@@ -193,7 +193,7 @@ func TestProvideIsIdempotentPerNode(t *testing.T) {
 	t.Cleanup(func() { dynNames = nil })
 
 	root := &Node{
-		Type:     "base",
+		Type:     "loong.base",
 		ID:       "root",
 		Children: []*Node{{Type: "test.dyn", ID: "mcp"}},
 	}
@@ -217,7 +217,7 @@ func TestProvideOfTheNodesOwnNameIsANoOp(t *testing.T) {
 	t.Cleanup(func() { dynNames = nil })
 
 	root := &Node{
-		Type:     "base",
+		Type:     "loong.base",
 		ID:       "root",
 		Children: []*Node{{Type: "test.contdyn", ID: "self"}},
 	}

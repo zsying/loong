@@ -29,7 +29,7 @@ func (c *List) Run(ctx *loong.Scope) error {
 }
 
 func init() {
-	loong.RegisterComponent("cli.list", func() loong.Component { return &List{} },
+	loong.RegisterComponent("loong.cli.list", func() loong.Component { return &List{} },
 		loong.WithDesc("list registered components (services, config, events)"),
 	)
 }

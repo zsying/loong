@@ -29,12 +29,12 @@ func cfgNode(t *testing.T, s string) yaml.Node {
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	root := &loong.Node{
-		Type: "base",
+		Type: "loong.base",
 		Children: []*loong.Node{
-			{Type: "user", ID: "users", Config: cfgNode(t, "db_path: \":memory:\"\n")},
-			{Type: "auth", ID: "auth", Config: cfgNode(t, "secret: test-secret\n")},
-			{Type: "web", ID: "main", Config: cfgNode(t, "listen: \"\"\n"), Children: []*loong.Node{
-				{Type: "web.account", ID: "account"},
+			{Type: "loong.user", ID: "users", Config: cfgNode(t, "db_path: \":memory:\"\n")},
+			{Type: "loong.auth", ID: "auth", Config: cfgNode(t, "secret: test-secret\n")},
+			{Type: "loong.web", ID: "main", Config: cfgNode(t, "listen: \"\"\n"), Children: []*loong.Node{
+				{Type: "loong.web.account", ID: "account"},
 			}},
 		},
 	}

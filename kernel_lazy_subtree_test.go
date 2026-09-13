@@ -74,7 +74,7 @@ func TestLazyAnchorKeepsItsSubtreeOffAtStartup(t *testing.T) {
 	var log []string
 	k := recTree(&log)
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.rec", ID: "off", Lazy: true, Children: []*Node{
 				{Type: "test.rec", ID: "inner"},
@@ -101,7 +101,7 @@ func TestActivatingALazyAnchorActivatesItsSubtree(t *testing.T) {
 	var log []string
 	k := recTree(&log)
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.rec", ID: "off", Lazy: true, Children: []*Node{
 				{Type: "test.rec", ID: "inner"},
@@ -137,7 +137,7 @@ func TestALazyDescendantStaysOffInsideAnActivatedSubtree(t *testing.T) {
 	var log []string
 	k := recTree(&log)
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.rec", ID: "off", Lazy: true, Children: []*Node{
 				{Type: "test.rec", ID: "inner"},
@@ -177,7 +177,7 @@ func TestActivationArgumentsBelongToTheAnchor(t *testing.T) {
 	registerForTest("test.argrec", func() Component { return &argComp{} })
 	k := New()
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.argrec", ID: "off", Lazy: true, Children: []*Node{
 				{Type: "test.argrec", ID: "inner"},
@@ -203,7 +203,7 @@ func TestActivationArgumentsBelongToTheAnchor(t *testing.T) {
 	// passes nothing — the subtree below is still brought up.
 	k2 := New()
 	root2 := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.argrec", ID: "off", Lazy: true, Children: []*Node{
 				{Type: "test.argrec", ID: "inner"},
@@ -234,7 +234,7 @@ func TestAFailedBuildInsideTheSubtreeStopsWhatWasBuilt(t *testing.T) {
 	registerForTest("test.bad", func() Component { return &badComp{} })
 	k := recTree(&log)
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.rec", ID: "off", Lazy: true, Children: []*Node{
 				{Type: "test.rec", ID: "ok"},
@@ -270,7 +270,7 @@ func TestActivatingANodeAssemblyBuiltIsANoOp(t *testing.T) {
 	var log []string
 	k := recTree(&log)
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.rec", ID: "up"},
 		},
@@ -296,7 +296,7 @@ func TestActivatingALazyAnchorTwiceBuildsItOnce(t *testing.T) {
 	var log []string
 	k := recTree(&log)
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.rec", ID: "off", Lazy: true, Children: []*Node{
 				{Type: "test.rec", ID: "inner"},

@@ -54,7 +54,7 @@ func TestFuncRunsViaKernel(t *testing.T) {
 		return nil
 	}, WithDesc("kernel run probe"))
 	k := New()
-	root, err := Parse([]byte("type: base\nchildren:\n  - type: loong.test.funcrun\n    id: f\n"))
+	root, err := Parse([]byte("type: loong.base\nchildren:\n  - type: loong.test.funcrun\n    id: f\n"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestFuncRunErrorSurfacesViaKernel(t *testing.T) {
 	want := errors.New("boom")
 	RegisterFunc("loong.test.funcerr", func(*Scope) error { return want })
 	k := New()
-	root, err := Parse([]byte("type: base\nchildren:\n  - type: loong.test.funcerr\n    id: f\n"))
+	root, err := Parse([]byte("type: loong.base\nchildren:\n  - type: loong.test.funcerr\n    id: f\n"))
 	if err != nil {
 		t.Fatalf("parse: %v", err)
 	}

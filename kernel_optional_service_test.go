@@ -52,7 +52,7 @@ func regOptionalTypes() {
 func TestOptionalServiceAbsenceIsNotAFailure(t *testing.T) {
 	regOptionalTypes()
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.optnil", ID: "none"},
 			{Type: "test.optuser", ID: "biz"},
@@ -79,7 +79,7 @@ func TestOptionalServiceAbsenceIsNotAFailure(t *testing.T) {
 func TestOptionalServiceThatServedNothingIsNotAProvider(t *testing.T) {
 	regOptionalTypes()
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.optnil", ID: "none"},
 			{Type: "test.optuser", ID: "biz"},
@@ -110,7 +110,7 @@ func TestOptionalServiceThatServedNothingIsNotAProvider(t *testing.T) {
 func TestOptionalServiceIsSkippedAmongOtherProviders(t *testing.T) {
 	regOptionalTypes()
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.optnil", ID: "none"},
 			{Type: "test.optsome", ID: "some"},
@@ -139,7 +139,7 @@ func TestRequiredServiceStillFailsOnNil(t *testing.T) {
 	registerForTest("test.reqnil", func() Component { return &optNil{} },
 		WithService(func(Component) *optSvc { return nil }))
 	root := &Node{
-		Type:     "base",
+		Type:     "loong.base",
 		ID:       "root",
 		Children: []*Node{{Type: "test.reqnil", ID: "broken"}},
 	}

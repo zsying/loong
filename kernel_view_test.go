@@ -30,7 +30,7 @@ func regTwoWebTypes() {
 func TestProvidersListsDeclaringNodesInTreeOrder(t *testing.T) {
 	regTwoWebTypes()
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.web2", ID: "second-type", Lazy: true},
 			{Type: "test.web", ID: "first-type", Lazy: true, Children: []*Node{
@@ -69,7 +69,7 @@ func TestProvidersListsDeclaringNodesInTreeOrder(t *testing.T) {
 func TestLazyLookupFindsTheProviderWhateverDeclaresIt(t *testing.T) {
 	regTwoWebTypes()
 	root := &Node{
-		Type:     "base",
+		Type:     "loong.base",
 		ID:       "root",
 		Children: []*Node{{Type: "test.web2", ID: "only", Lazy: true}},
 	}
@@ -101,7 +101,7 @@ func TestLazyLookupFindsTheProviderWhateverDeclaresIt(t *testing.T) {
 func TestLazyLookupPrefersTheNearestAncestorAcrossDeclaringTypes(t *testing.T) {
 	regTwoWebTypes()
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.web2", ID: "other", Lazy: true},
 			{Type: "test.web", ID: "mine", Lazy: true, Children: []*Node{
@@ -134,10 +134,10 @@ func TestLazyLookupPrefersTheNearestAncestorAcrossDeclaringTypes(t *testing.T) {
 // node's description, nor lose track of where the node sits.
 func TestNodeInfoCarriesDescAndParent(t *testing.T) {
 	root := &Node{
-		Type: "base", ID: "root", Desc: "the root",
+		Type: "loong.base", ID: "root", Desc: "the root",
 		Children: []*Node{
-			{Type: "base", ID: "child", Desc: "a child", Children: []*Node{
-				{Type: "base", ID: "grand"},
+			{Type: "loong.base", ID: "child", Desc: "a child", Children: []*Node{
+				{Type: "loong.base", ID: "grand"},
 			}},
 		},
 	}
@@ -190,7 +190,7 @@ func TestNodeInfoCarriesDescAndParent(t *testing.T) {
 // no node in this tree.
 func TestProviderLookupErrorsNameWhatIsMissing(t *testing.T) {
 	regTwoWebTypes()
-	root := &Node{Type: "base", ID: "root"}
+	root := &Node{Type: "loong.base", ID: "root"}
 	k := New()
 	defer func() { _ = k.Shutdown() }()
 	if err := k.Assemble(root); err != nil {
@@ -223,7 +223,7 @@ func TestProviderLookupErrorsNameWhatIsMissing(t *testing.T) {
 func TestNodeInfoCarriesDeclaredServices(t *testing.T) {
 	regWebPair()
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.web", ID: "web", Lazy: true},
 			{Type: "test.ruser", ID: "biz", Lazy: true},
@@ -261,7 +261,7 @@ func TestNodeInfoCarriesDeclaredServices(t *testing.T) {
 func TestConsumersRecordsWhoResolvedAService(t *testing.T) {
 	regWebPair()
 	root := &Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*Node{
 			{Type: "test.web", ID: "web", Children: []*Node{
 				{Type: "test.ruser", ID: "biz"},

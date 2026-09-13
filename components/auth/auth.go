@@ -127,7 +127,7 @@ func (c *Component) Build(scope *loong.Scope) error {
 }
 
 func init() {
-	loong.RegisterComponent("auth", func() loong.Component { return &Component{} },
+	loong.RegisterComponent("loong.auth", func() loong.Component { return &Component{} },
 		loong.WithConfig[Config](),
 		loong.WithService(func(c loong.Component) *Service { return c.(*Component).Service }),
 		loong.WithDesc("session tokens (JWT): issue, verify and a Guard middleware"),

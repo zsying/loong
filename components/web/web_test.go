@@ -90,17 +90,17 @@ func init() {
 // an argument are two answers to one question, not a precedence.
 func TestWebListenFromActivationArgument(t *testing.T) {
 	root := &loong.Node{
-		Type: "base", ID: "root",
+		Type: "loong.base", ID: "root",
 		Children: []*loong.Node{
 			{Type: "test.activator", ID: "holder",
 				Config: cfgNode(t, "child: late\narg: 127.0.0.1:0\n"),
 				Children: []*loong.Node{
-					{Type: "web", ID: "late", Lazy: true},
+					{Type: "loong.web", ID: "late", Lazy: true},
 				}},
 			{Type: "test.activator", ID: "clash",
 				Config: cfgNode(t, "child: doubled\narg: 127.0.0.1:0\n"),
 				Children: []*loong.Node{
-					{Type: "web", ID: "doubled", Lazy: true, Config: cfgNode(t, "listen: 127.0.0.1:0\n")},
+					{Type: "loong.web", ID: "doubled", Lazy: true, Config: cfgNode(t, "listen: 127.0.0.1:0\n")},
 				}},
 		},
 	}
@@ -377,8 +377,8 @@ func TestWebListenFailFast(t *testing.T) {
 	addr := ln.Addr().String()
 
 	root := &loong.Node{
-		Type:     "base",
-		Children: []*loong.Node{{Type: "web", ID: "main", Config: cfgNode(t, "listen: "+strconv.Quote(addr)+"\n")}},
+		Type:     "loong.base",
+		Children: []*loong.Node{{Type: "loong.web", ID: "main", Config: cfgNode(t, "listen: "+strconv.Quote(addr)+"\n")}},
 	}
 	k := loong.New()
 	if err := k.Assemble(root); err == nil || !strings.Contains(err.Error(), "listen") {
@@ -391,9 +391,9 @@ func TestWebListenFailFast(t *testing.T) {
 // by a child component over HTTP, then shut down gracefully.
 func TestWebComponentRun(t *testing.T) {
 	root := &loong.Node{
-		Type: "base",
+		Type: "loong.base",
 		Children: []*loong.Node{
-			{Type: "web", ID: "main", Config: cfgNode(t, "listen: 127.0.0.1:0\n"), Children: []*loong.Node{
+			{Type: "loong.web", ID: "main", Config: cfgNode(t, "listen: 127.0.0.1:0\n"), Children: []*loong.Node{
 				{Type: "test.echo", ID: "echo"},
 			}},
 		},
@@ -501,9 +501,9 @@ func TestRouterRegistrationErrors(t *testing.T) {
 // assembly instead of panicking inside the stdlib mux.
 func TestWebRouteConflictFailsAssembly(t *testing.T) {
 	root := &loong.Node{
-		Type: "base",
+		Type: "loong.base",
 		Children: []*loong.Node{
-			{Type: "web", ID: "main", Config: cfgNode(t, "listen: 127.0.0.1:0\n"), Children: []*loong.Node{
+			{Type: "loong.web", ID: "main", Config: cfgNode(t, "listen: 127.0.0.1:0\n"), Children: []*loong.Node{
 				{Type: "test.echo", ID: "a"},
 				{Type: "test.echo", ID: "b"}, // both register /ping
 			}},
@@ -560,9 +560,9 @@ func TestWebTLS(t *testing.T) {
 	dir := t.TempDir()
 	cert, key := selfSignedCert(t, dir)
 	root := &loong.Node{
-		Type: "base",
+		Type: "loong.base",
 		Children: []*loong.Node{
-			{Type: "web", ID: "main", Config: cfgNode(t, "listen: 127.0.0.1:0\ntls:\n  cert: "+strconv.Quote(cert)+"\n  key: "+strconv.Quote(key)+"\n"), Children: []*loong.Node{
+			{Type: "loong.web", ID: "main", Config: cfgNode(t, "listen: 127.0.0.1:0\ntls:\n  cert: "+strconv.Quote(cert)+"\n  key: "+strconv.Quote(key)+"\n"), Children: []*loong.Node{
 				{Type: "test.echo", ID: "echo"},
 			}},
 		},
@@ -597,9 +597,9 @@ func TestWebTLS(t *testing.T) {
 func TestWebTLSBadCertFails(t *testing.T) {
 	dir := t.TempDir()
 	root := &loong.Node{
-		Type: "base",
+		Type: "loong.base",
 		Children: []*loong.Node{
-			{Type: "web", ID: "main", Config: cfgNode(t, "listen: 127.0.0.1:0\ntls:\n  cert: "+strconv.Quote(filepath.Join(dir, "missing.pem"))+"\n  key: "+strconv.Quote(filepath.Join(dir, "missing.key"))+"\n")},
+			{Type: "loong.web", ID: "main", Config: cfgNode(t, "listen: 127.0.0.1:0\ntls:\n  cert: "+strconv.Quote(filepath.Join(dir, "missing.pem"))+"\n  key: "+strconv.Quote(filepath.Join(dir, "missing.key"))+"\n")},
 		},
 	}
 	k := loong.New()

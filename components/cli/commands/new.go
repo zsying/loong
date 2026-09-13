@@ -41,7 +41,7 @@ func (c *New) Run(ctx *loong.Scope) error {
 }
 
 func init() {
-	loong.RegisterComponent("cli.new", func() loong.Component { return &New{} },
+	loong.RegisterComponent("loong.cli.new", func() loong.Component { return &New{} },
 		loong.WithDesc("scaffold a new component source file"),
 	)
 }

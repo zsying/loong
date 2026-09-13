@@ -116,7 +116,7 @@ func TestGroupActivation(t *testing.T) {
 	root := &loong.Node{
 		Type: "test.parent", ID: "root",
 		Children: []*loong.Node{
-			{Type: "cli.group", ID: "config", Lazy: true, Children: []*loong.Node{
+			{Type: "loong.cli.group", ID: "config", Lazy: true, Children: []*loong.Node{
 				{Type: "test.show", ID: "show", Lazy: true},
 			}},
 		},
@@ -150,7 +150,7 @@ func TestNodeQuery(t *testing.T) {
 	root := &loong.Node{
 		Type: "test.parent", ID: "root",
 		Children: []*loong.Node{
-			{Type: "cli.group", ID: "config", Lazy: true, Children: []*loong.Node{
+			{Type: "loong.cli.group", ID: "config", Lazy: true, Children: []*loong.Node{
 				{Type: "test.show", ID: "show", Lazy: true},
 			}},
 		},
@@ -163,7 +163,7 @@ func TestNodeQuery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.ID != "config" || info.Type != "cli.group" || !info.Lazy {
+	if info.ID != "config" || info.Type != "loong.cli.group" || !info.Lazy {
 		t.Errorf("info = %+v", info)
 	}
 	if len(info.Children) != 1 || info.Children[0].ID != "show" {

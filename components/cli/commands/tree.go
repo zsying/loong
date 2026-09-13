@@ -39,7 +39,7 @@ func (c *Tree) Run(ctx *loong.Scope) error {
 }
 
 func init() {
-	loong.RegisterComponent("cli.tree", func() loong.Component { return &Tree{} },
+	loong.RegisterComponent("loong.cli.tree", func() loong.Component { return &Tree{} },
 		loong.WithDesc("show a project config tree with services and config"),
 	)
 }

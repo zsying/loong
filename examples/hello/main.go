@@ -2,7 +2,7 @@
 // kernel with log, user, auth and web components, plus a business
 // component mounted under the web channel, started via loong.LoadAndRun
 // and shut down gracefully on SIGINT/SIGTERM. The config tree root uses
-// the kernel-provided "base" container, so no custom root component is
+// the kernel-provided "loong.base" container, so no custom root component is
 // declared here.
 package main
 
