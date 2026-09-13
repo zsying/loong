@@ -59,7 +59,7 @@
 | 能力贡献 | `WithContributes[Kind]()`（名字 = 节点 id，纯结构、未激活即可枚举）+ `Scope.Provide[Kind](name)`（运行期才知道的名字）；`Kernel.Contributions[Kind]()` 列出两者，一个名字只能有一个主 |
 | 依赖观测 | `Kernel.Consumers[T]()`：实际取过 T 的节点 id（只在成功解析时记录，是 trace 不是声明） |
 | 组件上下文 | `loong.Scope`（刻意避开标准库 `context.Context` 同名冲突） |
-| 日志 | 标准库 log/slog，console（彩色）/ json 双格式、级别可配 |
+| 日志 | 标准库 log/slog，console（彩色）/ json 双格式、级别与输出流（stdout/stderr）可配；`log` 组件是进程默认 logger 的唯一属主，对外发布 `*log.Log`（`SetLevel` / `SetWriter` 旋钮），应用只拧旋钮、不再装第二个默认 |
 | 用户存储 | modernc.org/sqlite（纯 Go，无 cgo） |
 | Web 渠道 | 标准库 net/http 通道（`*web.Router` 注册面）；会话 `auth` 组件（golang-jwt） |
 | 微信 API | 自写最小 HTTP 封装（不引入 SDK） |

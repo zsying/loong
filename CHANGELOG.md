@@ -72,6 +72,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `listen` empty binds there. Naming the address twice — config and argument —
   is reported rather than resolved by precedence, and an unsupported argument
   type is an error instead of a silently unused one.
+- **log**: `output` config key — `stdout` (default) or `stderr` — so a tree can
+  keep records off a stream its application owns, and a service on the mounted
+  node: `*log.Log`, with `SetLevel` and `SetWriter`. The component is the only
+  thing that installs the process-wide `slog` default, which is what makes
+  these the supported way for an application to steer the logging it mounted.
+  An unknown `output` fails the build, like an unknown `level` or `format`.
 
 ### Changed
 
@@ -114,6 +120,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   commands; a command that mounts components under itself — a dashboard mounting
   the HTTP channel it starts — is now a single line instead of advertising names
   the argv cannot reach.
+- **log**: the level is a `slog.LevelVar` the handler reads on every record
+  rather than a value frozen into the handler when it was built, so `SetLevel`
+  applies to the next record — `console` and `json` alike — without rebuilding
+  anything. Color is decided from the destination whenever the handler is
+  built, so it follows `SetWriter` instead of staying whatever stdout happened
+  to be at startup.
 
 ### Fixed
 
