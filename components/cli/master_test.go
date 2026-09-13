@@ -470,6 +470,33 @@ func TestUsageRendering(t *testing.T) {
 	}
 }
 
+// TestUsageRenderingKeepsMountedChildrenOutOfTheListing pins the one
+// node shape that advertises subcommands. A group dispatches to a child
+// by name, so the listing spells the children out; every other node's
+// children are mounted components. A command that mounts a server under
+// itself — the dashboard's web node — must not read as if `dashboard
+// <dashweb>` were invocable, because `dashboard dashweb` activates
+// nothing.
+func TestUsageRenderingKeepsMountedChildrenOutOfTheListing(t *testing.T) {
+	nodes := []*loong.Node{
+		{Type: "test.rec", ID: "dashboard", Desc: "Open the web dashboard",
+			Children: []*loong.Node{
+				{Type: "web", ID: "dashweb", Lazy: true, Children: []*loong.Node{
+					{Type: "test.rec", ID: "dash"},
+				}},
+			}},
+	}
+	var buf bytes.Buffer
+	writeCommands(&buf, nodes, false)
+	out := buf.String()
+	if strings.Contains(out, "<") {
+		t.Errorf("mounted children rendered as subcommands: %s", out)
+	}
+	if !strings.Contains(out, "Open the web dashboard") {
+		t.Errorf("missing node desc: %s", out)
+	}
+}
+
 // TestWriteUsageLayout pins the help-screen layout: the master's Desc
 // becomes the program header, blank lines separate the sections, and
 // a master without a Desc skips the header entirely.

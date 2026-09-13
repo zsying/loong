@@ -107,6 +107,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not the argument. Views that describe the tree rather than run it — `Shutdown`,
   `Contributions[T]`, `NodeInfo` — still walk dormant subtrees, which is what
   lets them report what is there before anything activated it.
+- **The cli usage listing spells out subcommands only for a group.** The listing
+  appended ` <child, child>` to every node that had children, which reads as
+  subcommands that can be invoked. A `cli.group` is the one command shape that
+  dispatches to a child by name, so it is the one shape whose children are
+  commands; a command that mounts components under itself — a dashboard mounting
+  the HTTP channel it starts — is now a single line instead of advertising names
+  the argv cannot reach.
 
 ### Fixed
 

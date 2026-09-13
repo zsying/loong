@@ -201,13 +201,20 @@ const (
 // command name (plus its subcommands for groups) in bold, and the
 // node's description — Node.Desc, falling back to the component type's
 // WithDesc — in gray. Descriptions align in a second column.
+//
+// Only a group spells its children out, because only a group does
+// anything with them: it activates the child its first argument names,
+// so `daemon <start, stop>` is a true statement about the argv. Every
+// other node's children are mounted components — a command that mounts
+// a server under itself, say — and listing those would advertise
+// commands that do not exist.
 func writeCommands(w io.Writer, cmds []*loong.Node, color bool) {
 	heads := make([]string, len(cmds))
 	descs := make([]string, len(cmds))
 	width := 0
 	for i, c := range cmds {
 		head := c.ID
-		if len(c.Children) > 0 {
+		if c.Type == GroupType && len(c.Children) > 0 {
 			head += " <" + groupNames(c.Children) + ">"
 		}
 		heads[i] = head

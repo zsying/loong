@@ -7,6 +7,13 @@ import (
 	"github.com/zsying/loong"
 )
 
+// GroupType is the component type of the generic command group. It is
+// the one command shape whose children are commands, which is what the
+// usage listing reads it for: a group renders its children inline
+// (`daemon <start, stop>`), every other node's children are mounted
+// components and stay out of the listing.
+const GroupType = "cli.group"
+
 // Group is a lazy container for command groups: it holds subcommand
 // nodes in the tree (e.g. `config` with `show`/`set` children). Its
 // Run is the generic group behavior — the first argument names a
@@ -30,7 +37,7 @@ func (g *Group) Run(ctx *loong.Scope) error {
 }
 
 func init() {
-	loong.RegisterComponent("cli.group", func() loong.Component { return &Group{} },
+	loong.RegisterComponent(GroupType, func() loong.Component { return &Group{} },
 		loong.WithDesc("CLI command group container (activates its child command)"),
 	)
 }
