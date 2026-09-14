@@ -58,7 +58,8 @@
 | 可选服务 | `WithOptionalService[T](get)`：取值返回 nil 即「本节点不提供该服务」，该节点不再是提供者（查找跳过），装配不报错；消费方用 `TryGet` 把"没有"当作一种结果 |
 | 能力贡献 | `WithContributes[Kind]()`（名字 = 节点 id，纯结构、未激活即可枚举）+ `Scope.Provide[Kind](name)`（运行期才知道的名字）；`Kernel.Contributions[Kind]()` 列出两者，一个名字只能有一个主 |
 | 依赖观测 | `Kernel.Consumers[T]()`：实际取过 T 的节点 id（只在成功解析时记录，是 trace 不是声明） |
-| 组件上下文 | `loong.Scope`（刻意避开标准库 `context.Context` 同名冲突） |
+| 组件上下文 | `loong.Scope`（刻意避开标准库 `context.Context` 同名冲突）；`Scope.Args` 是父节点下发的激活参数（`any`，启动/服务激活为 nil） |
+| CLI 参数 | 总控激活的每个节点只有一个载荷类型 `cli.Args`（`cli.ArgsOf(scope)` 取出）：peel 掉的全局 flag + 剩余 argv，取值入口 `Bool` / `String` / `Positional` / `Arg` / `Unused`；不再有「pre 收 `*Globals`、命令收 `[]string`」的双契约 |
 | 日志 | 标准库 loong.log/slog，console（彩色）/ json 双格式、级别与输出流（stdout/stderr）可配；`loong.log` 组件是进程默认 logger 的唯一属主，对外发布 `*loong.log.Log`（`SetLevel` / `SetWriter` 旋钮），应用只拧旋钮、不再装第二个默认 |
 | 用户存储 | modernc.org/sqlite（纯 Go，无 cgo） |
 | Web 渠道 | 标准库 net/http 通道（`*web.Router` 注册面）；会话 `loong.auth` 组件（golang-jwt） |
@@ -225,9 +226,9 @@ children:
 CLI 应用与常驻渠道共用同一心智：**父组件定义其子节点的激活方式**（`Scope.Activate`），激活链全程是框架能力，无外部分发代码。`components/cli` 提供：
 
 - **父定义子激活（框架原语）**：`Scope.Activate(id string, args any)` —— 父节点激活自己的直接子节点，参数经子节点的 `Scope.Args` 注入；激活保持按节点幂等（参数首次激活生效）。这是通用能力，不限于 CLI（向导流程、状态机、插件选择皆可用）。
-- **loong.cli 核心（`components/cli`）**：总控 `loong.cli`（type `loong.cli`，Run 解析 os.Args 激活首段命令并传参，无参数/未知命令返回 `ErrUsage`）+ 通用组容器 `loong.cli.group`（把第一参数当子命令 `Activate` 下去，零定制，多级命令即树层级）+ 参数辅助 `HasFlag` / `Flag` / `Positional`：flag 拼写按惯例绑定——单字母短 flag 用 `-x`、单词长 flag 用 `--word`（`-html`/`--h` 这类混搭不命中）；同一选项要同时接受短长两种拼写就并列名字（`HasFlag(args, "h", "html")` 匹配 `-h` 或 `--html`，值 flag 同理 `Flag(args, "o", "output")` 匹配 `-o=out` 或 `--output=out`）。**只引入核心即可开发 CLI**。
+- **loong.cli 核心（`components/cli`）**：总控 `loong.cli`（type `loong.cli`，Run 解析 os.Args 激活首段命令并传参，无参数/未知命令返回 `ErrUsage`）+ 通用组容器 `loong.cli.group`（把第一参数当子命令 `Activate` 下去，零定制，多级命令即树层级）+ 参数载荷 `*cli.Args`：总控激活的每个节点（pre 与命令）拿到的都是同一个类型，用 `cli.ArgsOf(ctx)` 取出——nil（启动 / 服务激活 / `Kernel.Activate`）即「没有参数」，其他类型则报错并说出实际与期望的两种类型，替代过去 `args, _ := ctx.Args.([]string)` 把类型不符读成「没有参数」。取值入口：`Bool(names...)` 是开关（`-x` 真、`-x=false` 假，不再让调用方比字符串），`String(names...)` 同时接受 `=value` 与 POSIX 空格式（`-o=out` / `-o out` / `--output out`），`Positional()` / `Arg(i)` 跳过 flag 且 `--` 之后全算位置参数，`Unused()` 报告没人认领的 flag（拼错不再静默）。flag 拼写按惯例绑定——单字母短 flag 用 `-x`、单词长 flag 用 `--word`（`-html`/`--h` 这类混搭不命中）；同一选项要同时接受短长两种拼写就在调用点并列名字（`args.Bool("h", "html")` 匹配 `-h` 或 `--html`）。被总控 peel 掉的全局 flag 是同一份载荷的一部分：按任一已声明拼写即可读到，而「声明了但 argv 没给」仍是缺席——声明不等于给出。`Peel(argv, flags)` 供不经树的宿主自行构造同一份载荷。**只引入核心即可开发 CLI**。
 - **平台命令（可选，`components/cli/commands`）**：`loong.cli.list` / `loong.cli.new` / `loong.cli.tree` 独立子包，按需 `_ import`——不需要就不引入（yaml 里也不出现对应类型）。
-- **命令 = lazy 子组件**：业务命令挂载在总控下，`Run` 里读 `ctx.Args` 执行；CLI 是完整 loong 应用，同时挂载 `loong.log` 组件获得日志（命令/错误经 slog 记录）。
+- **命令 = lazy 子组件**：业务命令挂载在总控下，`Run` 里用 `cli.ArgsOf(ctx)` 读参数执行；CLI 是完整 loong 应用，同时挂载 `loong.log` 组件获得日志（命令/错误经 slog 记录）。
 - **退出码**：`ErrUsage` sentinel 标记用法错误（错误分类由 loong.cli 包给出，映射到具体数字是应用级决策——examples/cli 用 2，且**任何错误先记录再退出**）。命令在装配期执行（总控 Run 触发），`main` 只负责启动 + 错误映射 + `Shutdown`。
 - **入口 = 普通 loong 应用**：不提供启动封装（无 loong.cli.Go）——配置树内联用 `Parse + New + Assemble`，文件用 `loong.LoadAndRun`，退出码映射由 main 决定；examples/cli 展示两种入口。
 - 任何 loong 应用挂载这些组件即可获得组件化 CLI；`examples/cli` 是完整模板（总控 + loong.log + 业务命令 + 多级命令 + 平台命令）。扩展命令 = 注册组件类型 + yaml 加 lazy 节点。

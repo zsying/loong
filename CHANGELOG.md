@@ -16,11 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `value` kind) peeled anywhere in the argv, POSIX-style; undeclared tokens
   pass through untouched. A dangling value flag is a loud error.
 - **cli master**: `pre` config — a lazy child activated once, before the first
-  command, with `*cli.Globals` (peeled flags + rest). The componentized
-  PersistentPreRunE: runs exactly once per process (activation cache), never
-  on the usage path, is not selectable as a command, and its failure aborts
-  the whole activation chain. Commands keep receiving `[]string`; `cli.group`
-  unpacks either form.
+  command. The componentized PersistentPreRunE: runs exactly once per process
+  (activation cache), never on the usage path, is not selectable as a command,
+  and its failure aborts the whole activation chain.
 - **cli master**: built-in help — `-h` / `--help` anywhere in the argv or a
   `help` command token print the usage tree and exit 0 (no pre run, no
   activation). Auto-yield: spellings claimed by the app's flag schema or a
@@ -78,6 +76,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thing that installs the process-wide `slog` default, which is what makes
   these the supported way for an application to steer the logging it mounted.
   An unknown `output` fails the build, like an unknown `level` or `format`.
+- **cli**: `*cli.Args` — one argument payload for every node a CLI activates,
+  read with `cli.ArgsOf(ctx)`. `Bool(names...)` is a switch (`-x` true,
+  `-x=false` false) rather than a string to compare, `String(names...)` accepts
+  the `=value` and the POSIX space form in either spelling, `Positional()` /
+  `Arg(i)` skip flags and treat everything after `--` as positional, and
+  `Unused()` reports the flag nobody claimed, so a misspelled one stops being
+  silent. The peeled global flags ride in the same payload — a global is
+  readable by any of its declared spellings, and a declared flag the argv did
+  not carry stays absent — and `Peel(argv, flags)` builds one for a host that
+  dispatches outside the tree.
 
 ### Changed
 
@@ -127,8 +135,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   built, so it follows `SetWriter` instead of staying whatever stdout happened
   to be at startup.
 
+- **The cli master and its groups hand down one payload type.** A pre node used
+  to receive `*cli.Globals` while a command received a bare `[]string`, so every
+  consumer wrote `args, _ := ctx.Args.([]string)` — an assertion that reads a
+  type mismatch as "the command has no arguments" — and `cli.group` had to
+  unpack both forms. Every node the master activates now receives `*cli.Args`,
+  and `cli.ArgsOf(ctx)` names both types when it is handed something else.
+  A group forwards the payload it received, so the globals survive the hop.
+
 ### Fixed
 
+- A command could not read a global flag. The master peels declared flags from
+  the argv anywhere in the vector and then passed the command only what
+  remained, so `-v` — declared once in the tree, honoured by every command —
+  was unreadable to the command that received its effects. The command now
+  receives the peel result narrowed to its own argv.
 - The "node already provides a service" branch of service registration unlocked
   the kernel mutex by hand and again through its `defer`, so reaching it panicked
   with `fatal error: sync: unlock of unlocked mutex` instead of returning the
@@ -150,6 +171,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The registration-time warning about two component types declaring the same
   service type. It is a supported arrangement — resolution is per node — so the
   warning described a limitation that no longer exists.
+- The `cli.Globals` type and the argument helpers `cli.HasFlag` / `cli.Flag` /
+  `cli.Positional`. `*cli.Args` carries the peeled flags and the argv, so the
+  helpers became methods on it (`Bool` / `String` / `Positional` / `Arg` /
+  `Unused`) and `Flag`'s `=value`-only parse — which is why a consumer had
+  written its own parser to also accept `-x value` — is gone with it.
 
 ### Docs
 

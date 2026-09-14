@@ -18,9 +18,12 @@ type List struct {
 }
 
 func (c *List) Run(ctx *loong.Scope) error {
-	args, _ := ctx.Args.([]string)
+	args, err := cli.ArgsOf(ctx)
+	if err != nil {
+		return err
+	}
 	infos := loong.Components()
-	if cli.HasFlag(args, "h", "html") {
+	if args.Bool("h", "html") {
 		fmt.Print(renderListHTML(infos))
 	} else {
 		fmt.Print(renderListText(infos))

@@ -20,17 +20,20 @@ type Tree struct {
 }
 
 func (c *Tree) Run(ctx *loong.Scope) error {
-	args, _ := ctx.Args.([]string)
-	pos := cli.Positional(args)
-	if len(pos) == 0 {
+	args, err := cli.ArgsOf(ctx)
+	if err != nil {
+		return err
+	}
+	path, ok := args.Arg(0)
+	if !ok {
 		return fmt.Errorf("cli tree: missing config path (usage: cli tree [--html|-h] <config.yaml>)")
 	}
-	root, err := loong.LoadTree(pos[0])
+	root, err := loong.LoadTree(path)
 	if err != nil {
 		return err
 	}
 	meta := catalogIndex()
-	if cli.HasFlag(args, "h", "html") {
+	if args.Bool("h", "html") {
 		fmt.Print(renderTreeHTML(root, meta))
 	} else {
 		fmt.Print(renderTree(root, meta))

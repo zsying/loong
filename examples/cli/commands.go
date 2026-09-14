@@ -8,8 +8,8 @@ import (
 	"github.com/zsying/loong/components/cli"
 )
 
-// Greet is a business command component. It reads its arguments from
-// scope.Args — injected by the cli master via scope.Activate — and
+// Greet is a business command component. It reads its arguments from the
+// *cli.Args payload — injected by the cli master via scope.Activate — and
 // prints a greeting, logging through the mounted log component. This
 // is how a project's own command components plug into the tree: no
 // dispatch or argument plumbing to write.
@@ -18,12 +18,15 @@ type Greet struct {
 }
 
 func (g *Greet) Run(ctx *loong.Scope) error {
-	args, _ := ctx.Args.([]string)
-	name := "world"
-	if pos := cli.Positional(args); len(pos) > 0 {
-		name = pos[0]
+	args, err := cli.ArgsOf(ctx)
+	if err != nil {
+		return err
 	}
-	loud := cli.HasFlag(args, "l", "loud")
+	name := "world"
+	if first, ok := args.Arg(0); ok {
+		name = first
+	}
+	loud := args.Bool("l", "loud")
 	slog.Info("greet", "name", name, "loud", loud)
 	if loud {
 		fmt.Printf("HELLO, %s!\n", name)
@@ -40,12 +43,15 @@ type ConfigShow struct {
 }
 
 func (c *ConfigShow) Run(ctx *loong.Scope) error {
-	args, _ := ctx.Args.([]string)
-	pos := cli.Positional(args)
-	if len(pos) == 0 {
+	args, err := cli.ArgsOf(ctx)
+	if err != nil {
+		return err
+	}
+	key, ok := args.Arg(0)
+	if !ok {
 		return fmt.Errorf("config show: missing key (usage: config show <key>)")
 	}
-	fmt.Printf("%s = (unset)\n", pos[0])
+	fmt.Printf("%s = (unset)\n", key)
 	return nil
 }
 
@@ -56,12 +62,19 @@ type ConfigSet struct {
 }
 
 func (c *ConfigSet) Run(ctx *loong.Scope) error {
-	args, _ := ctx.Args.([]string)
-	pos := cli.Positional(args)
-	if len(pos) < 2 {
+	args, err := cli.ArgsOf(ctx)
+	if err != nil {
+		return err
+	}
+	key, ok := args.Arg(0)
+	if !ok {
 		return fmt.Errorf("config set: usage: config set <key> <value>")
 	}
-	fmt.Printf("%s = %s (saved)\n", pos[0], pos[1])
+	value, ok := args.Arg(1)
+	if !ok {
+		return fmt.Errorf("config set: usage: config set <key> <value>")
+	}
+	fmt.Printf("%s = %s (saved)\n", key, value)
 	return nil
 }
 

@@ -70,7 +70,22 @@ Press `Ctrl+C` to shut down gracefully (components are stopped in reverse Run or
 
 ## CLI
 
-CLI applications are built on the platform itself, using the **parent-defined activation** primitive (`scope.Activate(child, args)` — a parent activates one of its direct children and arguments flow through `scope.Args`). The `components/cli` package provides the core: a **loong.cli master** (parses the command line and activates the matching child command), a generic `loong.cli.group` container for multi-level commands, and argument helpers. The optional `components/cli/commands` package adds platform commands (`loong.cli.list` / `loong.cli.new` / `loong.cli.tree`) — import it only if you want them. A CLI is a full loong app, so it also mounts the `loong.log` component for logging. `examples/cli` is the working template (master + loong.log + custom business commands + multi-level groups).
+CLI applications are built on the platform itself, using the **parent-defined activation** primitive (`scope.Activate(child, args)` — a parent activates one of its direct children and arguments flow through `scope.Args`). The `components/cli` package provides the core: a **loong.cli master** (parses the command line and activates the matching child command), a generic `loong.cli.group` container for multi-level commands, and `*cli.Args` — the one payload every node the master activates reads its arguments from, peeled global flags included. The optional `components/cli/commands` package adds platform commands (`loong.cli.list` / `loong.cli.new` / `loong.cli.tree`) — import it only if you want them. A CLI is a full loong app, so it also mounts the `loong.log` component for logging. `examples/cli` is the working template (master + loong.log + custom business commands + multi-level groups).
+
+A command reads its arguments with `cli.ArgsOf(ctx)`, which reports a node wired to the wrong parent instead of letting it see nothing:
+
+```go
+func (c *Greet) Run(ctx *loong.Scope) error {
+    args, err := cli.ArgsOf(ctx)
+    if err != nil { return err }
+    name := "world"
+    if first, ok := args.Arg(0); ok { name = first }   // positional, bounds check included
+    loud := args.Bool("l", "loud")                     // -l / --loud, bare or =false
+    if out, ok := args.String("o", "output"); ok { _ = out }  // -o=out, -o out, --output out
+    if bad := args.Unused(); len(bad) > 0 { return fmt.Errorf("unknown flag %v", bad) }
+    ...
+}
+```
 
 ```bash
 go run ./examples/cli list                # component catalog of *this* app (platform + business)

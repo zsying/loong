@@ -18,14 +18,16 @@ type New struct {
 }
 
 func (c *New) Run(ctx *loong.Scope) error {
-	args, _ := ctx.Args.([]string)
-	pos := cli.Positional(args)
-	if len(pos) == 0 {
+	args, err := cli.ArgsOf(ctx)
+	if err != nil {
+		return err
+	}
+	name, ok := args.Arg(0)
+	if !ok {
 		return fmt.Errorf("cli new: missing component name (usage: cli new [--output=DIR|-o=DIR] <name>)")
 	}
-	name := pos[0]
 	outDir := "."
-	if d, ok := cli.Flag(args, "o", "output"); ok {
+	if d, ok := args.String("o", "output"); ok {
 		outDir = d
 	}
 	src, err := scaffoldComponent(name)

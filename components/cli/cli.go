@@ -49,9 +49,10 @@ var ErrUsage = errors.New("cli: usage error")
 // The master node's own Desc is the program description printed at the
 // top of the help screen.
 //
-// The pre node receives *Globals (peeled flags + remaining args); the
-// command receives []string. Pre semantics: it runs once per process
-// (ensureActive caches the activation) and only before an actual
+// The pre node and the command both receive *Args — the peeled global
+// flags plus the argv that is left — so a command can read a global flag
+// that was peeled from its own argv. Pre semantics: it runs once per
+// process (ensureActive caches the activation) and only before an actual
 // command — a usage request never triggers it. A pre failure aborts
 // the whole activation chain (fail-fast); the pre id is not selectable
 // as a command. Without a config block the master behaves exactly as
@@ -111,11 +112,11 @@ func (c *Component) masterRun(ctx *loong.Scope, args []string) error {
 	if c.helpRequested(args) {
 		return usage(ctx, c.cfg.Pre)
 	}
-	g, err := peel(args, c.cfg.Flags)
+	g, err := Peel(args, c.cfg.Flags)
 	if err != nil {
 		return err
 	}
-	token, rest := selectCommand(g.Rest)
+	token, rest := selectCommand(g.Rest())
 	// cmdID is the node id to activate: for an argv token, the child
 	// the token names (exact id, else id tail); for a bare invocation
 	// with a default configured, the default's own id.
@@ -124,7 +125,7 @@ func (c *Component) masterRun(ctx *loong.Scope, args []string) error {
 		if c.cfg.Default == "" {
 			return usage(ctx, c.cfg.Pre)
 		}
-		cmdID, rest = c.cfg.Default, g.Rest
+		cmdID, rest = c.cfg.Default, g.Rest()
 	} else if child := matchChild(ctx.Node, token); child == nil {
 		// A help token with no command claiming it prints the usage
 		// tree. Like every usage path, no pre runs and nothing
@@ -145,7 +146,11 @@ func (c *Component) masterRun(ctx *loong.Scope, args []string) error {
 			return err
 		}
 	}
-	return ctx.Activate(cmdID, rest)
+	// The command gets the peel result narrowed to its own argv, not the
+	// bare tail: a global flag was removed from that tail, so dropping
+	// the globals here would make -v invisible to the command that has to
+	// honour it.
+	return ctx.Activate(cmdID, g.Derive(rest))
 }
 
 // helpRequested reports whether the argv asks for help: the exact

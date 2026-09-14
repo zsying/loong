@@ -33,20 +33,22 @@ func (g *Group) Build(ctx *loong.Scope) error {
 }
 
 func (g *Group) Run(ctx *loong.Scope) error {
-	args, _ := ctx.Args.([]string)
-	// Dual Args contract: a master with flags peeling may hand down
-	// *Globals — the group unpacks Rest so either form works.
-	if gl, ok := ctx.Args.(*Globals); ok {
-		args = gl.Rest
+	args, err := ArgsOf(ctx)
+	if err != nil {
+		return err
 	}
-	if len(args) == 0 {
+	// One payload type end to end: whatever the parent handed down is an
+	// *Args, so the group forwards it unchanged instead of unpacking the
+	// pre-node shape from the command shape.
+	rest := args.Rest()
+	if len(rest) == 0 {
 		return fmt.Errorf("%w: %s requires one of [%s]", ErrUsage, ctx.Node.ID, strings.Join(commandNames(ctx.Node), ", "))
 	}
-	child := matchChild(ctx.Node, args[0])
+	child := matchChild(ctx.Node, rest[0])
 	if child == nil {
-		return fmt.Errorf("%w: %s has no command %q (one of [%s])", ErrUsage, ctx.Node.ID, args[0], strings.Join(commandNames(ctx.Node), ", "))
+		return fmt.Errorf("%w: %s has no command %q (one of [%s])", ErrUsage, ctx.Node.ID, rest[0], strings.Join(commandNames(ctx.Node), ", "))
 	}
-	return ctx.Activate(child.ID, args[1:])
+	return ctx.Activate(child.ID, args.Derive(rest[1:]))
 }
 
 func init() {

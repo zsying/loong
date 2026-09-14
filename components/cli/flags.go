@@ -12,11 +12,11 @@ type Config struct {
 	// a bare invocation prints usage.
 	Default string `yaml:"default,omitempty"`
 	// Pre names a lazy child activated once — before the first command
-	// of the process — with *Globals. Typical use: process-wide setup
-	// derived from global flags (log level, UI language), the
-	// componentized equivalent of cobra's PersistentPreRunE. The pre
-	// node is not selectable as a command and never runs on the usage
-	// path.
+	// of the process — with *Args (the peel result). Typical use:
+	// process-wide setup derived from global flags (log level, UI
+	// language), the componentized equivalent of cobra's
+	// PersistentPreRunE. The pre node is not selectable as a command and
+	// never runs on the usage path.
 	Pre string `yaml:"pre,omitempty"`
 	// Flags declares the global flags peeled from the argv before
 	// command selection. Flags are peeled anywhere in the argv
@@ -35,19 +35,6 @@ type FlagSpec struct {
 	Kind string `yaml:"kind,omitempty"`
 }
 
-// Globals is what the peel produces: the values of the declared flags
-// plus the argv that remains for the command. It is passed to the pre
-// node via Scope.Args; commands receive only Rest ([]string) — the
-// dual Args contract.
-type Globals struct {
-	// Flags holds one entry per declared flag seen in the argv. Bool
-	// flags store "true" unless spelled "-x=false"; value flags store
-	// their value. Absent flags are absent from the map.
-	Flags map[string]string
-	// Rest is the argv left after peeling, in original order.
-	Rest []string
-}
-
 // flagSpellings lists the conventional argv spellings of one flag: the
 // long form of its name and, when declared, its short alias (see
 // spelling for the dash-count convention).
@@ -59,42 +46,58 @@ func flagSpellings(name string, spec FlagSpec) []string {
 	return s
 }
 
-// peel splits args into the declared global flags and the rest. Flags
-// are peeled anywhere in the vector; everything undeclared — including
-// tokens that merely look like flags — is preserved in Globals.Rest in
-// original order.
-func peel(args []string, flags map[string]FlagSpec) (*Globals, error) {
-	g := &Globals{Flags: make(map[string]string, len(flags))}
-	for i := 0; i < len(args); i++ {
-		a := args[i]
-		name, val, hasVal, ok := matchFlag(a, flags)
+// Peel splits argv into the declared global flags and the argv that
+// remains, producing the Args the cli master hands down. It is the only
+// way an Args that carries global flags comes into being: the master
+// calls it with its own flag block, and a host that dispatches outside
+// the tree — or a test that runs a node directly — calls it with the
+// same schema.
+//
+// Flags are peeled anywhere in the vector (POSIX-style); everything
+// undeclared, including tokens that merely look like flags, is preserved
+// in Args.Rest in original order. A declared value flag whose value is
+// missing is a loud error.
+func Peel(argv []string, flags map[string]FlagSpec) (*Args, error) {
+	a := &Args{
+		flags:     make(map[string]string, len(flags)),
+		spellings: make(map[string]string, 2*len(flags)),
+	}
+	for name, spec := range flags {
+		for _, sp := range flagSpellings(name, spec) {
+			a.spellings[sp] = name
+		}
+	}
+	for i := 0; i < len(argv); i++ {
+		tok := argv[i]
+		name, val, hasVal, ok := matchFlag(tok, flags)
 		if !ok {
-			g.Rest = append(g.Rest, a)
+			a.rest = append(a.rest, tok)
 			continue
 		}
 		spec := flags[name]
 		if spec.Kind == "value" {
 			if hasVal {
-				g.Flags[name] = val
+				a.flags[name] = val
 				continue
 			}
 			// Bare value flag: consume the next token as its value.
-			if i+1 >= len(args) {
+			if i+1 >= len(argv) {
 				return nil, fmt.Errorf("cli: flag %s requires a value", spelling(name))
 			}
 			i++
-			g.Flags[name] = args[i]
+			a.flags[name] = argv[i]
 			continue
 		}
 		// Bool flag: bare form is true; "=x" stores x verbatim (the
 		// conventional false spelling is "-x=false").
 		if hasVal {
-			g.Flags[name] = val
+			a.flags[name] = val
 		} else {
-			g.Flags[name] = "true"
+			a.flags[name] = "true"
 		}
 	}
-	return g, nil
+	a.used = make([]bool, len(a.rest))
+	return a, nil
 }
 
 // matchFlag reports which declared flag the argv token is, in either

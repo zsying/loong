@@ -16,25 +16,36 @@ import (
 // recErr, when non-nil, makes every recorder's Run fail (pre-abort test).
 var recErr error
 
-// recorder records what a test command received: gotAny keeps the raw
-// Args (*Globals for the pre node, []string for commands), got keeps
-// the []string view, runs counts invocations (pre idempotency).
+// recorder records what a test command received: got keeps the raw
+// payload (an *Args for every node the master activates), runs counts
+// invocations (pre idempotency).
 type recorder struct {
 	loong.Base
-	ran    bool
-	runs   int
-	got    any
-	gotAny any
+	ran  bool
+	runs int
+	got  any
 }
 
 func (c *recorder) Run(ctx *loong.Scope) error {
 	c.ran = true
 	c.runs++
-	c.gotAny = ctx.Args
-	if args, ok := ctx.Args.([]string); ok {
-		c.got = args
-	}
+	c.got = ctx.Args
 	return recErr
+}
+
+// recArgs reads a recorder's payload as *Args. Every node the master
+// activates receives one, so any other type here is precisely the
+// mismatch the old `args, _ := ctx.Args.([]string)` swallowed.
+func recArgs(t *testing.T, c *recorder) *Args {
+	t.Helper()
+	if c == nil {
+		t.Fatal("the node never ran")
+	}
+	a, ok := c.got.(*Args)
+	if !ok {
+		t.Fatalf("payload = %T, want *cli.Args", c.got)
+	}
+	return a
 }
 
 func init() {
@@ -93,7 +104,7 @@ func buildMaster(t *testing.T, n *loong.Node, sc *loong.Scope) *Component {
 }
 
 // TestMasterDefaultAndPre pins the activation chain: bare invocation
-// activates pre (with *Globals) then the default command with the
+// activates pre (with the peel result) then the default command with the
 // remaining args.
 func TestMasterDefaultAndPre(t *testing.T) {
 	n, sc := cliNode(t, masterCfg, masterChildren()...)
@@ -105,15 +116,15 @@ func TestMasterDefaultAndPre(t *testing.T) {
 	if !got["globals"].ran || !got["tui"].ran {
 		t.Fatalf("pre=%v default=%v, both must run", got["globals"].ran, got["tui"].ran)
 	}
-	g, ok := got["globals"].gotAny.(*Globals)
-	if !ok {
-		t.Fatalf("pre args = %T, want *Globals", got["globals"].gotAny)
+	pre := recArgs(t, got["globals"])
+	if rest := pre.Rest(); len(rest) != 0 {
+		t.Errorf("pre Rest = %v, want empty", rest)
 	}
-	if len(g.Rest) != 0 || len(g.Flags) != 0 {
-		t.Errorf("pre Globals = %+v", g)
+	if v, ok := pre.String("verbose"); ok {
+		t.Errorf("pre saw --verbose = %q without it on the argv", v)
 	}
-	if got := got["tui"].got; got != nil && len(got.([]string)) != 0 {
-		t.Errorf("default args = %v, want empty", got)
+	if rest := recArgs(t, got["tui"]).Rest(); len(rest) != 0 {
+		t.Errorf("default args = %v, want empty", rest)
 	}
 }
 
@@ -132,8 +143,9 @@ func fetch(t *testing.T, n *loong.Node, k *loong.Kernel) map[string]*recorder {
 }
 
 // TestMasterPeelAnywhere pins that declared flags peel wherever they
-// appear, in every accepted spelling, and that undeclared tokens pass
-// through untouched.
+// appear, in every accepted spelling, that undeclared tokens pass
+// through untouched, and that the command — which never sees a peeled
+// flag in its own argv — still reads it from the payload.
 func TestMasterPeelAnywhere(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -160,21 +172,21 @@ func TestMasterPeelAnywhere(t *testing.T) {
 			name:       "value flag, space form, before command",
 			argv:       []string{"--lang", "en", "run"},
 			wantCmd:    "run",
-			wantCmdArg: []string{},
+			wantCmdArg: nil,
 			wantFlags:  map[string]string{"lang": "en"},
 		},
 		{
 			name:       "value flag, = form",
 			argv:       []string{"--lang=zh-CN", "run"},
 			wantCmd:    "run",
-			wantCmdArg: []string{},
+			wantCmdArg: nil,
 			wantFlags:  map[string]string{"lang": "zh-CN"},
 		},
 		{
 			name:       "bool = form",
 			argv:       []string{"-v=false", "run"},
 			wantCmd:    "run",
-			wantCmdArg: []string{},
+			wantCmdArg: nil,
 			wantFlags:  map[string]string{"verbose": "false"},
 		},
 		{
@@ -196,19 +208,39 @@ func TestMasterPeelAnywhere(t *testing.T) {
 			if !recs["globals"].ran {
 				t.Fatal("pre did not run")
 			}
-			g := recs["globals"].gotAny.(*Globals)
-			if len(g.Flags) != len(tc.wantFlags) {
-				t.Errorf("flags = %v, want %v", g.Flags, tc.wantFlags)
+			cmd := recArgs(t, recs[tc.wantCmd])
+			if got := cmd.Rest(); !reflect.DeepEqual(got, tc.wantCmdArg) {
+				t.Errorf("cmd Rest = %#v, want %#v", got, tc.wantCmdArg)
 			}
 			for k, v := range tc.wantFlags {
-				if g.Flags[k] != v {
-					t.Errorf("flag %q = %q, want %q (all: %v)", k, g.Flags[k], v, g.Flags)
+				got, ok := cmd.String(k)
+				if !ok || got != v {
+					t.Errorf("command reads %q = %q,%v; want %q — a peeled flag must reach the command", k, got, ok, v)
 				}
 			}
-			if got := recs[tc.wantCmd].got; got != nil && !reflect.DeepEqual(got, tc.wantCmdArg) {
-				t.Errorf("cmd args = %#v, want %#v", got, tc.wantCmdArg)
-			}
 		})
+	}
+}
+
+// TestMasterHandsTheCommandItsGlobals pins the fix for the old dual
+// contract: a command used to receive only the leftover argv, so a
+// global flag — peeled centrally and therefore absent from that argv —
+// was unreadable to the very command that had to honour it.
+func TestMasterHandsTheCommandItsGlobals(t *testing.T) {
+	n, sc := cliNode(t, masterCfg, masterChildren()...)
+	c := buildMaster(t, n, sc)
+	if err := c.masterRun(sc, []string{"-v", "--lang", "en", "run", "x"}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := recArgs(t, fetch(t, n, sc.Kernel)["run"])
+	if !cmd.Bool("v", "verbose") {
+		t.Error("the command cannot see -v: the peeled globals were dropped on the way down")
+	}
+	if got, ok := cmd.String("lang"); !ok || got != "en" {
+		t.Errorf("command reads lang = %q,%v, want en", got, ok)
+	}
+	if got := cmd.Rest(); !reflect.DeepEqual(got, []string{"x"}) {
+		t.Errorf("command Rest = %v, want [x]", got)
 	}
 }
 
@@ -286,7 +318,7 @@ func TestMasterNoConfigLegacy(t *testing.T) {
 	if recs["globals"] != nil && recs["globals"].ran {
 		t.Error("pre ran without config; want untouched legacy behavior")
 	}
-	if got := recs["run"].got; !reflect.DeepEqual(got, []string{"x"}) {
+	if got := recArgs(t, recs["run"]).Rest(); !reflect.DeepEqual(got, []string{"x"}) {
 		t.Errorf("args = %#v", got)
 	}
 
@@ -381,9 +413,8 @@ flags:
 	if !recs["tui"].ran {
 		t.Error("-h did not fall through to the default command")
 	}
-	g := recs["globals"].gotAny.(*Globals)
-	if g.Flags["html"] != "true" {
-		t.Errorf("html flag = %q, want true (all: %v)", g.Flags["html"], g.Flags)
+	if v, ok := recArgs(t, recs["globals"]).String("html"); !ok || v != "true" {
+		t.Errorf("html flag = %q,%v, want true", v, ok)
 	}
 
 	n2, sc2 := cliNode(t, masterCfg, append(masterChildren(), &loong.Node{Type: "test.rec", ID: "help", Lazy: true})...)
@@ -396,10 +427,11 @@ flags:
 	}
 }
 
-// TestGroupUnwrapsGlobals pins the dual Args contract: cli.group
-// accepts both the legacy []string and *Globals (Rest unpacked) so it
-// works under any master.
-func TestGroupUnwrapsGlobals(t *testing.T) {
+// TestGroupForwardsTheArgsPayload pins that a group hands its child the
+// same payload type it received, globals included. There is no second
+// form to unwrap any more, and a group that dropped the globals would
+// make -v invisible to every command under it.
+func TestGroupForwardsTheArgsPayload(t *testing.T) {
 	// test.show / test.parent are registered by TestGroupActivation;
 	// RegisterComponent panics on duplicates.
 	root := &loong.Node{
@@ -414,14 +446,25 @@ func TestGroupUnwrapsGlobals(t *testing.T) {
 	if err := k.Assemble(root); err != nil {
 		t.Fatal(err)
 	}
+	parent, err := Peel([]string{"-v", "show", "theme"}, map[string]FlagSpec{"verbose": {Short: "v", Kind: "bool"}})
+	if err != nil {
+		t.Fatal(err)
+	}
 	config := root.Children[0]
 	g := &Group{}
-	if err := g.Run(&loong.Scope{Kernel: k, Node: config, Args: &Globals{Rest: []string{"show", "theme"}}}); err != nil {
-		t.Fatalf("group run with Globals: %v", err)
+	if err := g.Run(&loong.Scope{Kernel: k, Node: config, Args: parent}); err != nil {
+		t.Fatalf("group run: %v", err)
 	}
 	show, _ := k.Component("show")
-	if got := show.(*gotArgs).got; !reflect.DeepEqual(got, []string{"theme"}) {
+	leaf, ok := show.(*gotArgs).got.(*Args)
+	if !ok {
+		t.Fatalf("leaf payload = %T, want *cli.Args", show.(*gotArgs).got)
+	}
+	if got := leaf.Positional(); !reflect.DeepEqual(got, []string{"theme"}) {
 		t.Errorf("leaf args = %#v, want [theme]", got)
+	}
+	if !leaf.Bool("verbose") {
+		t.Error("the group dropped the peeled globals on the way down")
 	}
 }
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -49,8 +50,8 @@ func TestTailCommandMatching(t *testing.T) {
 		t.Fatalf("config show: %v", err)
 	}
 	rec := recAt(t, sc.Kernel, "config.show")
-	if !rec.ran || len(rec.got.([]string)) != 1 || rec.got.([]string)[0] != "extra" {
-		t.Fatalf("config.show ran=%v args=%v, want [extra]", rec.ran, rec.got)
+	if got := recArgs(t, rec).Positional(); !rec.ran || !reflect.DeepEqual(got, []string{"extra"}) {
+		t.Fatalf("config.show ran=%v args=%v, want [extra]", rec.ran, got)
 	}
 
 	if err := c.masterRun(sc, []string{"cache", "show"}); err != nil {
@@ -68,7 +69,7 @@ func TestTailCommandMatching(t *testing.T) {
 	if err := c2.masterRun(sc2, []string{"config", "config.set", "k=v"}); err != nil {
 		t.Fatalf("config.set by full id: %v", err)
 	}
-	if got := recAt(t, sc2.Kernel, "config.set").got.([]string); len(got) != 1 || got[0] != "k=v" {
+	if got := recArgs(t, recAt(t, sc2.Kernel, "config.set")).Positional(); !reflect.DeepEqual(got, []string{"k=v"}) {
 		t.Fatalf("config.set args = %v, want [k=v]", got)
 	}
 
