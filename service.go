@@ -176,6 +176,8 @@ func (s *Scope) TryGetFrom[T any](id string) (T, error) {
 // before anything has activated it, and asking activates nothing. An
 // empty result means no mounted node declares T; that is an answer, not
 // an error — TryGet is where a lookup reports it.
+//
+// Provides is the same question about one node.
 func (k *Kernel) Providers[T any]() []string {
 	t := reflect.TypeOf((*T)(nil)).Elem()
 	k.mu.Lock()
@@ -185,6 +187,34 @@ func (k *Kernel) Providers[T any]() []string {
 		ids = append(ids, n.ID)
 	}
 	return ids
+}
+
+// Provides reports whether the node with the given id can serve T — the
+// pointwise form of Providers, answered by the same predicate, so the
+// two cannot disagree. An id that names no node is not a provider: the
+// question is whether that node can answer a lookup of T, and an id
+// naming nothing cannot.
+//
+// It is what a component asks about its own children. "Every node under
+// here must serve T" is a rule a container enforces while it assembles,
+// and that rule is about one child at a time; asking each one is both
+// what the rule says and the only shape that answers about a node
+// without reading the whole tree first.
+//
+// Like Providers it describes the tree, not the runtime: a lazy node
+// answers before anything has activated it, and asking activates
+// nothing. The one thing it does track is a declaration that turned out
+// to serve nothing (an optional service whose accessor returned nil):
+// that node stops answering, because it can no longer serve a lookup.
+// This is why a consumer must ask the kernel rather than read
+// NodeInfo.Services itself — the view keeps reporting the declaration,
+// and the declaration is not the service.
+func (k *Kernel) Provides[T any](id string) bool {
+	t := reflect.TypeOf((*T)(nil)).Elem()
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	n := k.idIndex[id]
+	return n != nil && k.nodeProvides(n, t)
 }
 
 // Consumers returns the ids of the nodes that have resolved a service

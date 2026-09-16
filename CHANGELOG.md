@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **kernel**: `Kernel.Provides[T](id) bool` — the pointwise form of
+  `Providers[T]()`: whether one node can serve T. It is the question a component
+  asks about its own children, and the first consumer is owlet's tool container,
+  which refuses a leaf under `owlet.tools` that serves no tools: asking about one
+  node by enumerating the whole tree is a local question answered with a global
+  read. Both answers come from the same predicate, so they cannot disagree, and
+  an id that names no node is not a provider. Pinned by
+  `kernel_provides_test.go`; the mechanism of each of its assertions was
+  mutation-verified.
+
 - **kernel**: a service type may be an **interface** — `WithService` keys the
   declaration by the interface itself, so `Providers[T]()` answers "which
   component types implement this capability" (a question no concrete-type

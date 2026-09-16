@@ -53,7 +53,7 @@
 | 配置树 | YAML，两段式解析（schema-per-component），支持 `${ENV}` 展开 |
 | 组件 config | `WithConfig[T]` 声明结构（`Components()` 展示字段）；`scope.Config[T]()` 严格解码（未知字段报错） |
 | 事件协议 | `{Name, Source, Payload}`，直达直接父节点，`On(name, handler)` 订阅 |
-| 服务查找 | `Scope.Get[T]()` 树优先级（唯一提供者或父链最近；歧义提示 `GetFrom[T](id)`），Go 类型即 key；`Kernel.Providers[T]()` 枚举候选节点 id |
+| 服务查找 | `Scope.Get[T]()` 树优先级（唯一提供者或父链最近；歧义提示 `GetFrom[T](id)`），Go 类型即 key；`Kernel.Providers[T]()` 枚举候选节点 id；`Kernel.Provides[T](id)` 是同一判断的单节点形式（容器校验自身子节点用，命名不存在的 id 不算提供者） |
 | 服务组件 | 注册选项 `WithService[T](get)`（可多个）；激活规则与普通组件一致（默认装配激活 / yaml `lazy: true` 按需激活整棵子树），多实例并存 |
 | 可选服务 | `WithOptionalService[T](get)`：取值返回 nil 即「本节点不提供该服务」，该节点不再是提供者（查找跳过），装配不报错；消费方用 `TryGet` 把"没有"当作一种结果 |
 | 能力贡献 | `WithContributes[Kind]()`（名字 = 节点 id，纯结构、未激活即可枚举）+ `Scope.Provide[Kind](name)`（运行期才知道的名字）；`Kernel.Contributions[Kind]()` 列出两者，一个名字只能有一个主 |
@@ -212,10 +212,11 @@ children:
 - 例：用户体系在 Web 下表现为会话登录，在小程序下表现为 openid 登录；日志在 API 下输出 JSON、在 TUI 下输出 ANSI 彩色——组件本身不改，读父链下发的配置 / 角色决定行为。
 - **服务提供的约定**：服务的**唯一声明入口**是注册选项 `WithService[T](get)`——`get` 是取值函数，激活后从组件实例取出服务值，类型由泛型参数编译期固定（无 `any`、无运行期校验）。一个组件可声明多个服务（多次 `WithService`）。服务按「类型 → 节点 id」登记，**同类型允许多个提供者并存**（如 main / admin 两个 loong.web 实例），不再有装配期唯一性约束。查找只通过 `Scope`：`scope.Get[T]()` 在唯一提供者时直接命中；多提供者时沿「自身 + 父链向上」取最近的声明者（组件挂在哪就属于哪，契合重用组件的父子约定），父链无匹配则报错提示 `GetFrom[T](id)` 按节点 id 显式取。**候选集合是树里所有「组件类型声明了该服务」的节点，与"是哪个组件类型声明的"无关**——同一服务类型被多个组件类型声明是合法的，查找只按节点判断，不存在"每类型取一个"的索引。**T 允许是接口类型，且这是「一个能力、多个实现类型」时的唯一问法**：声明按接口类型登记，`Providers[T]()` 于是回答"哪些组件类型实现了这个能力"，查找返回的是组件本身（`v.(T)`），调用其方法即到达实现；`Consumers[T]()` 的轨迹同样按接口记账。owlet 的"一个工具一个组件类型"正是这个用法（工具节点即接口实现）。`Kernel.Providers[T]()` 枚举这些候选节点的 id（即 `GetFrom[T](id)` 接受的 id），是纯结构查询：lazy 节点未激活也列出，查询本身不激活任何节点。惰性激活遵循同一优先级：多候选时只激活父链命中的节点。**激活与"是否提供服务"无关**——服务组件与其他组件一样默认装配激活，需要按需就在配置树标 `lazy: true`（首次查找时激活）；`TryGet / TryGetFrom` 报告错误，`Get / GetFrom` 返回零值；`Activate(id)` 可手动激活任意 lazy 节点。组件发现用 `loong.Components()`（type / desc / service 类型 / 贡献家族 / emits / config 元数据）。
 
-  两处补完：
+  三处补完：
 
   - **可选服务**：`WithOptionalService[T](get)` 与 `WithService` 形状相同，差别只在 nil 的含义。必选服务取到 nil 是错误（组件过早返回），可选服务取到 nil 是答案——「本节点没有这种能力」，该节点记入 skip 表，之后的查找（`Providers`/`GetFrom`/按需激活都算）不再把它当提供者，于是"没配后端就没这个能力"不必再发明哨兵值。消费方用 `TryGet` 把"没有"当作一种结果。注意 lazy 节点在激活前无法预知，激活后才发现为空时该次查找仍报错，换个提供者用 `GetFrom[T](id)`。
   - **依赖观测**：`Kernel.Consumers[T]()` 列出"实际取过 T"的节点 id（树序）。它记录的是运行事实而非声明：没跑过的 lazy 节点、查失败的调用都不出现，所以它是排障用的 trace，目录用途仍然找 `Providers[T]()`。
+  - **单节点判断**：`Kernel.Provides[T](id) bool` 是 `Providers[T]()` 的逐点形式——「这一个节点能不能回答 T 的查找」。它存在的理由是消费方的形状：容器要校验自己的子节点（owlet 的 `owlet.tools` 拒绝"不提供工具"的叶子），问的是"这个孩子"，枚举全树再判成员等于把局部问题写成全局读。两者用同一个判定，所以不可能给出不同答案；命名不存在的 id 不算提供者（那个 id 答不了任何查找）。它同样是纯结构查询：不激活被问的节点，lazy 未激活也照答；唯一会变的是"声明了但取值为 nil"的节点——激活后就不再作答，而 `NodeInfo.Services` 仍列着那条声明，所以消费方不能拿视图当判定源。
 
 - **能力贡献的约定**：`WithContributes[Kind]()` 让一个组件类型的节点把自己的 id 贡献进 `Kind` 家族（Kind 是 Go 类型，与 service key 同哲学，不会串味）；`Scope.Provide[Kind](name)` 补上运行期才知道的名字（如 MCP server 报回的工具名）。`Kernel.Contributions[Kind]()` 按「结构性（树序）→ 运行期（注册序）」列出全部名字，**纯结构**：声明了但还没激活的节点也在列，查询不激活任何东西——这正是它相对"拿 registry 当判定源"的价值：消费方解析一个子树提供了什么，不再依赖"提供者必须排在消费者之前"。一个名字只能有一个主：同一节点重申自己的名字是 no-op，别的节点抢占则就地报错（歧义与重复节点 id 是同一类错误，只有调用方分得清，因为是它选的名字）。
 - **装配失败清理**：Build / Run 阶段任一组件失败，已 Build 的组件会按逆序 Stop（释放 db / server 等资源），`Shutdown` 在未装配或装配失败后调用均为安全空操作。
