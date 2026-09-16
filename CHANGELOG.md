@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **kernel**: a service type may be an **interface** — `WithService` keys the
+  declaration by the interface itself, so `Providers[T]()` answers "which
+  component types implement this capability" (a question no concrete-type
+  table can answer), the entry is still read from the skeleton before the
+  node builds, a lookup returns the component so calling through it reaches
+  the implementation, and `Consumers[T]()` traces it like any other service.
+  Pinned by `kernel_interface_service_test.go`; the mechanism of each of its
+  four assertions was mutation-verified.
+
 - **cli master**: `default` config — bare invocation activates the named child
   command instead of printing usage (TUI-first apps like owlet no longer need
   a custom master).
