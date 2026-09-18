@@ -99,6 +99,50 @@ func (s *Scope) OnTyped[T any](name string, h func(T) error) {
 	})
 }
 
+// Subscribe registers h for a topic, addressing it by name alone rather
+// than by tree position. It returns the function that unsubscribes;
+// call it from Stop so a stopped node stops being called.
+//
+// This is the counterpart of Emit, for state that changes at runtime
+// and must be reflected in nodes other than the one that changed it.
+// The two differ in direction and in reach:
+//
+//   - Emit travels one hop up to the direct parent, preserving the
+//     locality contract that a subtree's events belong to its owner.
+//   - Subscribe is tree-wide: publisher and subscribers need no
+//     ancestor relationship, and one publish reaches all of them.
+//
+// Use Emit for a node reporting to the component that owns it. Use
+// Subscribe when the publisher holds a value others mirror and cannot
+// enumerate them — a config service notifying whoever depends on it,
+// for instance. A publish with no subscriber is a successful no-op, so
+// a publisher never needs a subscriber to exist.
+func (s *Scope) Subscribe(topic string, h Handler) func() {
+	return s.Kernel.subscribe(s.Node.ID, topic, h)
+}
+
+// Publish delivers payload to every subscriber of topic and returns the
+// first handler error, stopping delivery there. A topic nobody
+// subscribed to is a successful no-op. Runtime change is the intended
+// case: the holder of the new value publishes, and whoever mirrors it
+// reacts, without the holder knowing who they are.
+func (s *Scope) Publish(topic string, payload any) error {
+	return s.Kernel.publish(s.Node, topic, payload)
+}
+
+// SubscribeTyped is Subscribe with the payload assertion moved to the
+// subscription side, mirroring OnTyped. A payload of the wrong type is
+// reported to the publisher as a handler error rather than panicking.
+func (s *Scope) SubscribeTyped[T any](topic string, h func(T) error) func() {
+	return s.Subscribe(topic, func(e Event) error {
+		p, ok := e.Payload.(T)
+		if !ok {
+			return fmt.Errorf("loong: topic %q payload is %T, want %T", topic, e.Payload, *new(T))
+		}
+		return h(p)
+	})
+}
+
 // Provide contributes an extra name of kind T for this node: the case a
 // declaration cannot express, because the name does not exist until the
 // component runs — the tools a remote server reports, say. Once

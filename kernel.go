@@ -29,6 +29,22 @@ type Kernel struct {
 	skipped map[reflect.Type]map[string]bool
 	// consumers traces, per service type, the nodes that resolved it.
 	consumers map[reflect.Type]map[string]bool
+
+	// topics holds the runtime topic subscriptions. Unlike handlers,
+	// which are addressed to a node's direct parent, a topic is
+	// addressed by name alone: the publisher does not need to know who
+	// listens, and a subscriber does not need to be related to the
+	// publisher. Entries are kept in registration order so a publish
+	// fans out deterministically.
+	topics map[string][]*topicSub
+}
+
+// topicSub is one topic subscription. node is the subscribing node's
+// id, kept for diagnostics; cancel removes the entry from the kernel
+// table.
+type topicSub struct {
+	node   string
+	handle Handler
 }
 
 // contribution is one contributed name and the node it came from.
@@ -50,6 +66,7 @@ func New() *Kernel {
 		provided:  make(map[reflect.Type][]contribution),
 		skipped:   make(map[reflect.Type]map[string]bool),
 		consumers: make(map[reflect.Type]map[string]bool),
+		topics:    make(map[string][]*topicSub),
 	}
 }
 
@@ -656,4 +673,53 @@ func (k *Kernel) emitStrict(from *Node, e Event) error {
 		return h(e)
 	}
 	return fmt.Errorf("%w: %q from %q on parent %q", ErrNoSubscriber, e.Name, from.ID, from.parent.ID)
+}
+
+// publish fans a topic out to every subscriber, in registration order.
+// A topic with no subscriber is a successful no-op: the publisher never
+// needs to know who listens, which is what separates this from
+// emitStrict. The first handler error stops delivery and is returned,
+// so a subscriber that fails to apply a change can veto the publish
+// rather than leaving half the tree updated.
+func (k *Kernel) publish(from *Node, topic string, payload any) error {
+	k.mu.Lock()
+	subs := make([]*topicSub, len(k.topics[topic]))
+	copy(subs, k.topics[topic])
+	k.mu.Unlock()
+
+	for _, s := range subs {
+		if err := s.handle(Event{Name: topic, Source: from.ID, Payload: payload}); err != nil {
+			return fmt.Errorf("loong: topic %q subscriber %q: %w", topic, s.node, err)
+		}
+	}
+	return nil
+}
+
+// subscribe registers a handler for a topic and returns the function
+// that removes it. Registering twice with the same handler is allowed
+// and delivers twice, so a subscriber that wants to re-subscribe does
+// not have to track whether it already did.
+func (k *Kernel) subscribe(node, topic string, h Handler) func() {
+	k.mu.Lock()
+	sub := &topicSub{node: node, handle: h}
+	k.topics[topic] = append(k.topics[topic], sub)
+	k.mu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			k.mu.Lock()
+			defer k.mu.Unlock()
+			subs := k.topics[topic]
+			for i, s := range subs {
+				if s == sub {
+					k.topics[topic] = append(subs[:i], subs[i+1:]...)
+					break
+				}
+			}
+			if len(k.topics[topic]) == 0 {
+				delete(k.topics, topic)
+			}
+		})
+	}
 }

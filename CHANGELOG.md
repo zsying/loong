@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **kernel**: `Scope.Subscribe` / `Scope.Publish` (and a typed
+  `Scope.SubscribeTyped`) — topics addressed by name, tree-wide. `Emit` travels
+  one hop up to the direct parent, which keeps a subtree's events local to its
+  owner but cannot express the other shape: a node holding a value that others
+  mirror and cannot enumerate. A config service notifying whoever depends on it
+  is the first case. A subscriber needs no ancestor relationship to the
+  publisher, one publish reaches all subscribers in registration order, and a
+  topic nobody subscribed to is a successful no-op so the publisher never needs
+  a subscriber to exist. Delivery happens outside the lock, so a handler may
+  unsubscribe itself or publish again; the first handler error stops delivery
+  and is returned, letting a subscriber veto a change rather than leave half the
+  tree updated. `Emit`'s semantics are unchanged. Pinned by `topic_test.go`; the
+  mechanism of each assertion was mutation-verified.
+
 - **kernel**: `Kernel.Provides[T](id) bool` — the pointwise form of
   `Providers[T]()`: whether one node can serve T. It is the question a component
   asks about its own children, and the first consumer is owlet's tool container,
