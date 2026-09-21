@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-21
+
+Capability release, driven by the owlet migration: tree-wide topics, interface
+services, contributes, and a componentized CLI master.
+
 ### Added
 
 - **kernel**: `Scope.Subscribe` / `Scope.Publish` (and a typed
